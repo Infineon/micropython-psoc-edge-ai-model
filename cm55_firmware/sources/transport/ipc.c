@@ -61,6 +61,17 @@ static void (*s_on_data)(const uint8_t *data, size_t len) = NULL;
  * pipe ISR; sized to the configurable drain chunk (IPC_H2T_CHUNK).          */
 static uint8_t s_rx_scratch[IPC_H2T_CHUNK];
 
+#define IPC_MAX_CLIENTS  (CY_IPC_CYPIPE_CLIENT_CNT)
+typedef struct {
+    uint8_t          client_id;
+    ipc_client_cb_t  cb;
+} ipc_client_entry_t;
+static ipc_client_entry_t s_clients[IPC_MAX_CLIENTS];
+static size_t s_num_clients;
+
+/* Dedicated shared TX buffer for command replies.  */
+CY_SECTION_SHAREDMEM static ipc_msg_t s_cmd_tx;
+
 /* Drain `total` bytes from the host -> target ring, handing them to the data
  * sink in <= IPC_H2T_CHUNK pieces. `total` may exceed the ring: CM33 streams
  * with back-pressure, so we consume what is present, deliver it, and wait
@@ -98,7 +109,8 @@ static void ipc_rx_callback(uint32_t *msg_data)
     if (msg_data == NULL || s_iface == NULL) {
         return;
     }
-    const ipc_msg_t *msg = (const ipc_msg_t *)msg_data;
+    const ipc_msg_t *msg = (const ipc_msg_t *)msg_data;    
+    // Handle incoming IPC bulk data.
     if (msg->cmd == IPC_CMD_DATA_AVAIL) {
         s_pending_rx_length = msg->value;
         if (s_process_task != NULL) {
@@ -109,6 +121,18 @@ static void ipc_rx_callback(uint32_t *msg_data)
         }
         return;
     }
+
+    // Look for a registered client that matches the incoming message's client ID.
+    for (size_t i = 0U; i < s_num_clients; i++) {
+        if (s_clients[i].client_id == msg->client_id) {
+            if (s_clients[i].cb != NULL) {
+                s_clients[i].cb(msg->client_id, msg->cmd, msg->value);
+            }
+            return;
+        }
+    }
+
+    // If no registered client handled the message, call the generic receive callback.
     if (s_iface->on_receive != NULL) {
         s_iface->on_receive(msg->cmd, msg->value);
     }
@@ -141,7 +165,7 @@ static bool ipc_send(deepcraft_interface_t *self, uint8_t cmd, uint32_t value)
     return false;
 }
 
-/* ── vtable: register_receive_cb ─────────────────────────────────────────── */
+/* ── vtable: register_receive_cb for deepcraft_interface ─────────────────────────── */
 static void ipc_register_receive_cb(deepcraft_interface_t *self,
     void (*cb)(uint8_t cmd, uint32_t value))
 {
@@ -150,6 +174,43 @@ static void ipc_register_receive_cb(deepcraft_interface_t *self,
     Cy_IPC_Pipe_RegisterCallback(CM55_IPC_PIPE_EP_ADDR,
         &ipc_rx_callback,
         (uint32_t)CM55_IPC_PIPE_CLIENT_ID);
+}
+
+/* ── Multi-client command channel for generic CM55 clients ───────────────────────── */
+bool ipc_interface_register_client(uint8_t cm55_client_id, ipc_client_cb_t cb)
+{
+    /* Reject ids the pipe cannot route and guard the fixed dispatch table. */
+    if (cm55_client_id >= CY_IPC_CYPIPE_CLIENT_CNT
+            || s_num_clients >= IPC_MAX_CLIENTS) {
+        return false;
+    }
+    s_clients[s_num_clients].client_id = cm55_client_id;
+    s_clients[s_num_clients].cb        = cb;
+    s_num_clients++;
+    return Cy_IPC_Pipe_RegisterCallback(CM55_IPC_PIPE_EP_ADDR,
+        &ipc_rx_callback, (uint32_t)cm55_client_id) == CY_IPC_PIPE_SUCCESS;
+}
+
+bool ipc_interface_send_command(uint8_t cm33_client_id, uint8_t cmd, uint32_t value)
+{
+    cy_en_ipc_pipe_status_t status;
+    uint32_t retries = 0U;
+
+    s_cmd_tx.client_id = cm33_client_id;
+    s_cmd_tx.intr_mask = CY_IPC_CYPIPE_INTR_MASK;
+    s_cmd_tx.cmd       = cmd;
+    s_cmd_tx.value     = value;
+
+    while (retries < IPC_SEND_MAX_RETRIES) {
+        status = Cy_IPC_Pipe_SendMessage(CM33_IPC_PIPE_EP_ADDR,
+            CM55_IPC_PIPE_EP_ADDR, (void *)&s_cmd_tx, NULL);
+        if (status == CY_IPC_PIPE_SUCCESS) {
+            return true;
+        }
+        retries++;
+        Cy_SysLib_DelayUs(IPC_SEND_RETRY_DELAY_US);
+    }
+    return false;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

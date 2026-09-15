@@ -63,6 +63,22 @@ size_t ipc_interface_send_data(const uint8_t *data, size_t len);
  */
 void ipc_interface_set_data_cb(void (*cb)(const uint8_t *data, size_t len));
 
+/*
+ * Register an application callback for an arbitrary CM55 pipe client id. The
+ * transport routes every non-bulk message to the callback whose client id
+ * matches the message, so multiple independent command services can share the
+ * single CM55 endpoint uniformly. Call before starting the scheduler. Returns
+ * false if the client id is out of range or the dispatch table is full.
+ */
+typedef void (*ipc_client_cb_t)(uint8_t client_id, uint8_t cmd, uint32_t value);
+bool ipc_interface_register_client(uint8_t cm55_client_id, ipc_client_cb_t cb);
+
+/*
+ * Send a command message to an arbitrary CM33 pipe client. Serialize calls
+ * returns false if the pipe stayed busy.
+ */
+bool ipc_interface_send_command(uint8_t cm33_client_id, uint8_t cmd, uint32_t value);
+
 /* ── Notify helpers: send VA model events to the host ───────────────────── */
 
 #endif /* IPC_H */
