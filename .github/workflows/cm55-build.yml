@@ -10,13 +10,18 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────
   build:
     runs-on: ubuntu-24.04
-    env:
-      TOOLCHAIN_IMAGE: ifxmakers/psoc-embedded-ai-toolchain:deepcraft-latest
 
     strategy:
       matrix:
         config: [Debug]
-        framework: [deepcraft]
+        framework: [deepcraft, tflm]
+        include:
+          - framework: deepcraft
+            appname: cm55_firmware
+            toolchain_image: ifxmakers/psoc-embedded-ai-toolchain:deepcraft-latest
+          - framework: tflm
+            appname: tflm
+            toolchain_image: ifxmakers/psoc-embedded-ai-toolchain:tflm-0.1.0
 
     steps:
       - uses: actions/checkout@v7
@@ -24,14 +29,14 @@ jobs:
           submodules: recursive
 
       - name: Pull toolchain image
-        run: docker pull ${{ env.TOOLCHAIN_IMAGE }}
+        run: docker pull ${{ matrix.toolchain_image }}
 
       - name: Build firmware
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
             -w /workspace/cm55_firmware \
-            ${{ env.TOOLCHAIN_IMAGE }} \
+            ${{ matrix.toolchain_image }} \
             make CONFIG=${{ matrix.config }} FRAMEWORK=${{ matrix.framework }}
 
       - name: Upload firmware artifacts
@@ -39,15 +44,16 @@ jobs:
         with:
           name: firmware-${{ matrix.framework }}-${{ matrix.config }}
           path: |
-            cm55_firmware/build/${{ matrix.config }}/cm55_firmware.elf
-            cm55_firmware/build/${{ matrix.config }}/cm55_firmware.hex
-            cm55_firmware/build/${{ matrix.config }}/cm55_firmware.bin
+            cm55_firmware/build/${{ matrix.config }}/${{ matrix.appname }}.elf
+            cm55_firmware/build/${{ matrix.config }}/${{ matrix.appname }}.hex
+            cm55_firmware/build/${{ matrix.config }}/${{ matrix.appname }}.bin
 
   # ─────────────────────────────────────────────────────────────────────────
   # Test deploy utility — runs deepcraft-voice-assistant-model-deploy.py the
   # way a user would, up to (and including) building. No board is attached to
   # this runner, so flashing is skipped; the bundled test_gpio_control model
-  # is always used.
+  # is always used. Deepcraft-specific, so it doesn't run for the tflm
+  # framework.
   # ─────────────────────────────────────────────────────────────────────────
   test-deploy-utility:
     runs-on: ubuntu-24.04
@@ -55,7 +61,7 @@ jobs:
       TOOLCHAIN_IMAGE: ifxmakers/psoc-embedded-ai-toolchain:deepcraft-latest
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
 
