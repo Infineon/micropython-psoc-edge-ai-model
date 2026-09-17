@@ -18,13 +18,13 @@ jobs:
         include:
           - framework: deepcraft
             appname: cm55_firmware
-            toolchain_image: ifxmakers/psoc-embedded-ai-toolchain:deepcraft-0.1.0
+            toolchain_image: ifxmakers/psoc-embedded-ai-toolchain:deepcraft-latest
           - framework: tflm
             appname: tflm
             toolchain_image: ifxmakers/psoc-embedded-ai-toolchain:tflm-0.1.0
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -58,7 +58,7 @@ jobs:
   test-deploy-utility:
     runs-on: ubuntu-24.04
     env:
-      TOOLCHAIN_IMAGE: ifxmakers/psoc-embedded-ai-toolchain:deepcraft-0.1.0
+      TOOLCHAIN_IMAGE: ifxmakers/psoc-embedded-ai-toolchain:deepcraft-latest
 
     steps:
       - uses: actions/checkout@v4
