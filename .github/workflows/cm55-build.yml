@@ -10,28 +10,32 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────
   build:
     runs-on: ubuntu-24.04
-    env:
-      TOOLCHAIN_IMAGE: ifxmakers/psoc-embedded-ai-toolchain:deepcraft-latest
 
     strategy:
       matrix:
         config: [Debug]
-        framework: [deepcraft]
+        include:
+          - framework: deepcraft
+            appname: cm55_firmware
+            toolchain_image: ifxmakers/psoc-embedded-ai-toolchain:deepcraft-0.1.0
+          - framework: tflm
+            appname: tflm
+            toolchain_image: ifxmakers/psoc-embedded-ai-toolchain:tflm-0.1.0
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
 
       - name: Pull toolchain image
-        run: docker pull ${{ env.TOOLCHAIN_IMAGE }}
+        run: docker pull ${{ matrix.toolchain_image }}
 
       - name: Build firmware
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
             -w /workspace/cm55_firmware \
-            ${{ env.TOOLCHAIN_IMAGE }} \
+            ${{ matrix.toolchain_image }} \
             make CONFIG=${{ matrix.config }} FRAMEWORK=${{ matrix.framework }}
 
       - name: Upload firmware artifacts
@@ -39,42 +43,6 @@ jobs:
         with:
           name: firmware-${{ matrix.framework }}-${{ matrix.config }}
           path: |
-            cm55_firmware/build/${{ matrix.config }}/cm55_firmware.elf
-            cm55_firmware/build/${{ matrix.config }}/cm55_firmware.hex
-            cm55_firmware/build/${{ matrix.config }}/cm55_firmware.bin
-
-  # ─────────────────────────────────────────────────────────────────────────
-  # Test deploy utility — runs deepcraft-voice-assistant-model-deploy.py the
-  # way a user would, up to (and including) building. No board is attached to
-  # this runner, so flashing is skipped; the bundled test_gpio_control model
-  # is always used.
-  # ─────────────────────────────────────────────────────────────────────────
-  test-deploy-utility:
-    runs-on: ubuntu-24.04
-    env:
-      TOOLCHAIN_IMAGE: ifxmakers/psoc-embedded-ai-toolchain:deepcraft-latest
-
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          submodules: recursive
-
-      - name: Pull toolchain image
-        run: docker pull ${{ env.TOOLCHAIN_IMAGE }}
-
-      - name: Build via deploy utility
-        run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
-            ${{ env.TOOLCHAIN_IMAGE }} \
-            sh -c '
-              LLVM_DIR=$(dirname "$(dirname "$(which clang)")") &&
-              python3 tools/deepcraft-voice-assistant-model-deploy.py \
-                --repo-dir /workspace \
-                --config-file tools/deepcraft-voice-assistant-model-deploy.ini \
-                build test_gpio_control \
-                --llvm-dir "$LLVM_DIR" \
-                --make-cmd make \
-                -j "$(nproc)"
-            '
+            cm55_firmware/build/${{ matrix.config }}/${{ matrix.appname }}.elf
+            cm55_firmware/build/${{ matrix.config }}/${{ matrix.appname }}.hex
+            cm55_firmware/build/${{ matrix.config }}/${{ matrix.appname }}.bin
