@@ -25,12 +25,25 @@
 #define VA_TASK_NAME         ("va-task")
 #define VA_TASK_STACK_SIZE   (10 * 1024)
 #define VA_TASK_PRIORITY     (CY_RTOS_PRIORITY_NORMAL)
+#define IPC_TASK_NAME        ("ipc-task")
+#define IPC_TASK_STACK_SIZE  (2048U)
+#define IPC_TASK_PRIORITY    (CY_RTOS_PRIORITY_NORMAL)
 #define COMMAND_STRING_SIZE  (250U)
 #define CMD_TIMEOUT_MS       (5000U)
 
 static volatile bool g_va_enabled  = false;
 static TaskHandle_t  g_va_task_hdl = NULL;
+static TaskHandle_t  g_ipc_task_hdl = NULL;
 static ipc_interface_t g_ipc_interface;
+
+static void ipc_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        ipc_interface_process();
+    }
+}
 
 uint8_t  bf_coeffs[1];
 uint32_t bf_coeffs_total_len;
@@ -150,6 +163,12 @@ int main(void)
     /* Initialise the DeepCraft model interface (transport configured inside) */
     ipc_interface_init(&g_ipc_interface);
     deepcraft_wrapper_init(&g_ipc_interface.base, on_va_start, on_va_stop);
+
+    result = xTaskCreate(ipc_task, IPC_TASK_NAME, IPC_TASK_STACK_SIZE,
+        NULL, IPC_TASK_PRIORITY, &g_ipc_task_hdl);
+    CY_ASSERT(result == pdPASS);
+    // Set the IPC task as the task responsible for processing IPC events
+    ipc_interface_set_process_task(g_ipc_task_hdl);
 
 #ifdef USE_AUDIO_ENHANCEMENT
     ae_rslt_t ae_result = audio_enhancement_init(1U);

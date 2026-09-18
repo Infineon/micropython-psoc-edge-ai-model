@@ -82,6 +82,9 @@
 #define IPC_CMD_STOP                    (0x83)
 #define IPC_CMD_STATUS                  (0x41)
 
+/* Doorbell: bulk bytes are available in the sender's shared ring buffer */
+#define IPC_CMD_DATA_AVAIL              (0x84)
+
 /*******************************************************************************
 * Enumeration
 *******************************************************************************/
