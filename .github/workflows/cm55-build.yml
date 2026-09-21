@@ -17,7 +17,7 @@ jobs:
         framework: [deepcraft, tflm]
         include:
           - framework: deepcraft
-            appname: cm55_firmware
+            appname: deepcraft
             toolchain_image: ifxmakers/psoc-embedded-ai-toolchain:deepcraft-latest
           - framework: tflm
             appname: tflm
@@ -61,7 +61,7 @@ jobs:
       TOOLCHAIN_IMAGE: ifxmakers/psoc-embedded-ai-toolchain:deepcraft-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
