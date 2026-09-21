@@ -21,7 +21,6 @@ static tflite::MicroInterpreter *interpreter = nullptr;
 
 static void set_status(uint32_t status)
 {
-    g_tflm_result.magic = TFLM_RESULT_MAGIC;
     g_tflm_result.status = status;
 }
 
@@ -92,6 +91,7 @@ static bool read_sample_output(const TfLiteTensor *output)
 extern "C" bool tflm_init(const uint8_t *model_data)
 {
     std::memset(&g_tflm_result, 0, sizeof(g_tflm_result));
+    g_tflm_result.magic = TFLM_RESULT_MAGIC;
     set_status(1U);
 
     const tflite::Model *model = tflite::GetModel(model_data);
