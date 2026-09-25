@@ -10,6 +10,8 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────
   build:
     runs-on: ubuntu-24.04
+    env:
+      TOOLCHAIN_IMAGE: ifxmakers/psoc-embedded-ai-toolchain:toolchains-0.1.0
 
     strategy:
       matrix:
@@ -18,10 +20,8 @@ jobs:
         include:
           - framework: deepcraft
             appname: deepcraft
-            toolchain_image: ifxmakers/psoc-embedded-ai-toolchain:deepcraft-latest
           - framework: tflm
             appname: tflm
-            toolchain_image: ifxmakers/psoc-embedded-ai-toolchain:tflm-0.1.0
 
     steps:
       - uses: actions/checkout@v7
@@ -29,15 +29,24 @@ jobs:
           submodules: recursive
 
       - name: Pull toolchain image
-        run: docker pull ${{ matrix.toolchain_image }}
+        run: docker pull ${{ env.TOOLCHAIN_IMAGE }}
+
+      - name: Regenerate tflm_tree (tflm framework only)
+        if: matrix.framework == 'tflm'
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace/cm55_firmware/framework/tflm \
+            ${{ env.TOOLCHAIN_IMAGE }} \
+            make -f tflm.mk regen-tflm-tree
 
       - name: Build firmware
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
             -w /workspace/cm55_firmware \
-            ${{ matrix.toolchain_image }} \
-            make CONFIG=${{ matrix.config }} FRAMEWORK=${{ matrix.framework }}
+            ${{ env.TOOLCHAIN_IMAGE }} \
+            make CONFIG=${{ matrix.config }} FRAMEWORK=${{ matrix.framework }} APPNAME=${{ matrix.appname }}
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4
@@ -58,7 +67,7 @@ jobs:
   test-deploy-utility:
     runs-on: ubuntu-24.04
     env:
-      TOOLCHAIN_IMAGE: ifxmakers/psoc-embedded-ai-toolchain:deepcraft-latest
+      TOOLCHAIN_IMAGE: ifxmakers/psoc-embedded-ai-toolchain:toolchains-0.1.0
 
     steps:
       - uses: actions/checkout@v7
