@@ -20,6 +20,10 @@ BOARD_DIR     := $(APP_DIR)
 BUILD_DIR     := $(BOARD_DIR)/build/$(CONFIG)
 FRAMEWORK_DIR := $(APP_DIR)/framework/$(FRAMEWORK)
 
+# Frameworks normally use framework/<name>/Makefile; tflm uses
+# framework/tflm/tflm.mk instead (see there for why).
+FRAMEWORK_MAKEFILE := $(if $(wildcard $(FRAMEWORK_DIR)/$(FRAMEWORK).mk),$(FRAMEWORK).mk,Makefile)
+
 # All hardware/BSP config in one place
 include $(BOARD_DIR)/board.mk
 
@@ -30,7 +34,7 @@ build: framework
 
 framework:
 	$(if $(wildcard $(FRAMEWORK_DIR)),,$(error Unknown framework: $(FRAMEWORK). Available frameworks: $(notdir $(wildcard $(APP_DIR)/framework/*))))
-	$(MAKE) -C $(FRAMEWORK_DIR) -f Makefile \
+	$(MAKE) -C $(FRAMEWORK_DIR) -f $(FRAMEWORK_MAKEFILE) \
 		APPNAME=$(APPNAME) \
 		CONFIG=$(CONFIG) \
 		BOARD=$(BOARD) \
@@ -40,7 +44,7 @@ framework:
 
 clean:
 	$(if $(wildcard $(FRAMEWORK_DIR)),,$(error Unknown framework: $(FRAMEWORK). Available frameworks: $(notdir $(wildcard $(APP_DIR)/framework/*))))
-	$(MAKE) -C $(FRAMEWORK_DIR) -f Makefile clean \
+	$(MAKE) -C $(FRAMEWORK_DIR) -f $(FRAMEWORK_MAKEFILE) clean \
 		APPNAME=$(APPNAME) \
 		CONFIG=$(CONFIG) \
 		BOARD=$(BOARD) \
@@ -50,7 +54,7 @@ clean:
 
 flash deploy:
 	$(if $(wildcard $(FRAMEWORK_DIR)),,$(error Unknown framework: $(FRAMEWORK). Available frameworks: $(notdir $(wildcard $(APP_DIR)/framework/*))))
-	$(MAKE) -C $(FRAMEWORK_DIR) -f Makefile deploy \
+	$(MAKE) -C $(FRAMEWORK_DIR) -f $(FRAMEWORK_MAKEFILE) deploy \
 		APPNAME=$(APPNAME) \
 		CONFIG=$(CONFIG) \
 		BOARD=$(BOARD) \

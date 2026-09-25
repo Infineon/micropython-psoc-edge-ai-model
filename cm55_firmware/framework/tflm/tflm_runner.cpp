@@ -2,8 +2,8 @@
 #include <cstring>
 
 #include "tensorflow/lite/c/common.h"
-#include "tensorflow/lite/micro/all_ops_resolver.h"
 #include "tensorflow/lite/micro/micro_interpreter.h"
+#include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
 #include "tensorflow/lite/schema/schema_generated.h"
 
 #include "tflm_result.h"
@@ -13,6 +13,141 @@
 
 alignas(16) static uint8_t tensor_arena[TFLM_TENSOR_ARENA_SIZE]
     __attribute__((section(".cy_socmem_data")));
+
+// Upstream tflite-micro dropped AllOpsResolver (it forces callers to opt into
+// exactly the ops a model needs, for binary size). This runner has no
+// compile-time knowledge of which model gets flashed, so register every
+// available builtin op here to keep the old AllOpsResolver-style behavior.
+using TflmOpResolver = tflite::MicroMutableOpResolver<128>;
+
+static TflmOpResolver &GetOpResolver()
+{
+    static TflmOpResolver resolver;
+    static bool initialized = false;
+    if (!initialized) {
+        resolver.AddAbs();
+        resolver.AddAdd();
+        resolver.AddAddN();
+        resolver.AddArgMax();
+        resolver.AddArgMin();
+        resolver.AddAssignVariable();
+        resolver.AddAveragePool2D();
+        resolver.AddBasicClassifier();
+        resolver.AddBatchMatMul();
+        resolver.AddBatchToSpaceNd();
+        resolver.AddBroadcastArgs();
+        resolver.AddBroadcastTo();
+        resolver.AddCallOnce();
+        resolver.AddCast();
+        resolver.AddCeil();
+        resolver.AddCircularBuffer();
+        resolver.AddConcatenation();
+        resolver.AddConv2D();
+        resolver.AddCos();
+        resolver.AddCumSum();
+        resolver.AddDecode();
+        resolver.AddDelay();
+        resolver.AddDepthToSpace();
+        resolver.AddDepthwiseConv2D();
+        resolver.AddDequantize();
+        resolver.AddDetectionPostprocess();
+        resolver.AddDiv();
+        resolver.AddDynamicUpdateSlice();
+        resolver.AddEmbeddingLookup();
+        resolver.AddEnergy();
+        resolver.AddElu();
+        resolver.AddEqual();
+        resolver.AddEthosU();
+        resolver.AddExp();
+        resolver.AddExpandDims();
+        resolver.AddFftAutoScale();
+        resolver.AddFill();
+        resolver.AddFilterBank();
+        resolver.AddFilterBankLog();
+        resolver.AddFilterBankSquareRoot();
+        resolver.AddFilterBankSpectralSubtraction();
+        resolver.AddFloor();
+        resolver.AddFloorDiv();
+        resolver.AddFloorMod();
+        resolver.AddFramer();
+        resolver.AddFullyConnected();
+        resolver.AddGather();
+        resolver.AddGatherNd();
+        resolver.AddGreater();
+        resolver.AddGreaterEqual();
+        resolver.AddHardSwish();
+        resolver.AddIf();
+        resolver.AddIrfft();
+        resolver.AddL2Normalization();
+        resolver.AddL2Pool2D();
+        resolver.AddLeakyRelu();
+        resolver.AddLess();
+        resolver.AddLessEqual();
+        resolver.AddLog();
+        resolver.AddLogicalAnd();
+        resolver.AddLogicalNot();
+        resolver.AddLogicalOr();
+        resolver.AddLogistic();
+        resolver.AddLogSoftmax();
+        resolver.AddMaximum();
+        resolver.AddMaxPool2D();
+        resolver.AddMirrorPad();
+        resolver.AddMean();
+        resolver.AddMinimum();
+        resolver.AddMul();
+        resolver.AddNeg();
+        resolver.AddNotEqual();
+        resolver.AddOverlapAdd();
+        resolver.AddPack();
+        resolver.AddPad();
+        resolver.AddPadV2();
+        resolver.AddPCAN();
+        resolver.AddPrelu();
+        resolver.AddQuantize();
+        resolver.AddReadVariable();
+        resolver.AddReduceAll();
+        resolver.AddReduceMax();
+        resolver.AddReduceMin();
+        resolver.AddRelu();
+        resolver.AddRelu6();
+        resolver.AddReshape();
+        resolver.AddResizeBilinear();
+        resolver.AddResizeNearestNeighbor();
+        resolver.AddReverseV2();
+        resolver.AddRfft();
+        resolver.AddRound();
+        resolver.AddRsqrt();
+        resolver.AddSelectV2();
+        resolver.AddShape();
+        resolver.AddSin();
+        resolver.AddSlice();
+        resolver.AddSoftmax();
+        resolver.AddSpaceToBatchNd();
+        resolver.AddSpaceToDepth();
+        resolver.AddSplit();
+        resolver.AddSplitV();
+        resolver.AddSqueeze();
+        resolver.AddSqrt();
+        resolver.AddSquare();
+        resolver.AddSquaredDifference();
+        resolver.AddStridedSlice();
+        resolver.AddStacker();
+        resolver.AddSub();
+        resolver.AddSum();
+        resolver.AddSvdf();
+        resolver.AddTanh();
+        resolver.AddTransposeConv();
+        resolver.AddTranspose();
+        resolver.AddUnpack();
+        resolver.AddUnidirectionalSequenceLSTM();
+        resolver.AddVarHandle();
+        resolver.AddWhile();
+        resolver.AddWindow();
+        resolver.AddZerosLike();
+        initialized = true;
+    }
+    return resolver;
+}
 
 __attribute__((section(".cy_sharedmem")))
 tflm_demo_result_t g_tflm_result;
@@ -100,7 +235,7 @@ extern "C" bool tflm_init(const uint8_t *model_data)
         return false;
     }
 
-    static tflite::AllOpsResolver resolver;
+    TflmOpResolver &resolver = GetOpResolver();
     static tflite::MicroInterpreter static_interpreter(
         model, resolver, tensor_arena, TFLM_TENSOR_ARENA_SIZE);
     interpreter = &static_interpreter;

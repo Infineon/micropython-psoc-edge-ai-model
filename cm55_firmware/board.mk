@@ -65,39 +65,82 @@ endif
 # Toolchain
 ################################################################################
 
-CC      := clang
-CXX     := clang++
-AS      := clang
-LD      := clang
-AR      := llvm-ar
-OBJCOPY := llvm-objcopy
-SIZE    := llvm-size
-OPENOCD := openocd
+# TOOLCHAIN=LLVM_ARM (default) or GCC_ARM. NOTE: the deepcraft framework's
+# prebuilt audio-voice-core archives (ifx_va.a/sp_enh.a) only ship
+# TOOLCHAIN_LLVM_ARM/TOOLCHAIN_ARM variants -- GCC_ARM only works for
+# frameworks that don't link those (e.g. tflm, shared_flash_read). The tflm
+# framework Makefile forces TOOLCHAIN=GCC_ARM unconditionally (see there).
+TOOLCHAIN     ?= LLVM_ARM
+TOOLCHAIN_DIR := TOOLCHAIN_$(TOOLCHAIN)
+OPENOCD       := openocd
 
-ifdef LLVM_DIR
-    CC      := $(LLVM_DIR)/bin/clang
-    CXX     := $(LLVM_DIR)/bin/clang++
-    AS      := $(LLVM_DIR)/bin/clang
-    LD      := $(LLVM_DIR)/bin/clang
-    AR      := $(LLVM_DIR)/bin/llvm-ar
-    OBJCOPY := $(LLVM_DIR)/bin/llvm-objcopy
-    SIZE    := $(LLVM_DIR)/bin/llvm-size
-    export PATH := $(subst \,/,$(LLVM_DIR))/bin:$(PATH)
+ifeq ($(TOOLCHAIN),GCC_ARM)
+    CC      := arm-none-eabi-gcc
+    CXX     := arm-none-eabi-g++
+    AS      := arm-none-eabi-gcc
+    LD      := arm-none-eabi-g++
+    AR      := arm-none-eabi-ar
+    OBJCOPY := arm-none-eabi-objcopy
+    SIZE    := arm-none-eabi-size
+
+    ifdef GCC_ARM_DIR
+        CC      := $(GCC_ARM_DIR)/bin/arm-none-eabi-gcc
+        CXX     := $(GCC_ARM_DIR)/bin/arm-none-eabi-g++
+        AS      := $(GCC_ARM_DIR)/bin/arm-none-eabi-gcc
+        LD      := $(GCC_ARM_DIR)/bin/arm-none-eabi-g++
+        AR      := $(GCC_ARM_DIR)/bin/arm-none-eabi-ar
+        OBJCOPY := $(GCC_ARM_DIR)/bin/arm-none-eabi-objcopy
+        SIZE    := $(GCC_ARM_DIR)/bin/arm-none-eabi-size
+        export PATH := $(subst \,/,$(GCC_ARM_DIR))/bin:$(PATH)
+    endif
+else
+    CC      := clang
+    CXX     := clang++
+    AS      := clang
+    LD      := clang
+    AR      := llvm-ar
+    OBJCOPY := llvm-objcopy
+    SIZE    := llvm-size
+
+    ifdef LLVM_DIR
+        CC      := $(LLVM_DIR)/bin/clang
+        CXX     := $(LLVM_DIR)/bin/clang++
+        AS      := $(LLVM_DIR)/bin/clang
+        LD      := $(LLVM_DIR)/bin/clang
+        AR      := $(LLVM_DIR)/bin/llvm-ar
+        OBJCOPY := $(LLVM_DIR)/bin/llvm-objcopy
+        SIZE    := $(LLVM_DIR)/bin/llvm-size
+        export PATH := $(subst \,/,$(LLVM_DIR))/bin:$(PATH)
+    endif
 endif
 
 ################################################################################
 # Compiler / linker flags
 ################################################################################
 
+# GCC infers the Cortex-M55 FPU/MVE config from -mcpu alone; clang needs the
+# FPU spelled out explicitly (its -mfpu= naming differs from GCC's).
+ifeq ($(TOOLCHAIN),GCC_ARM)
+    FPU_FLAGS :=
+else
+    FPU_FLAGS := -mfpu=fp-armv8-fullfp16-d16
+endif
+
 CPU_FLAGS := \
-    --target=arm-none-eabi \
     -mcpu=cortex-m55 \
     -mthumb \
     -mfloat-abi=hard \
-    -mfpu=fp-armv8-fullfp16-d16
+    $(FPU_FLAGS)
 
 ifeq ($(CONFIG),Debug)
-    OPT_FLAGS   := -O0 -g
+    # CMSIS-NN's hand-written MVE inline asm can hit "impossible constraints"
+    # under GCC at -O0 (not enough spare registers without any optimization);
+    # -Og keeps debuggability while giving GCC enough room to allocate them.
+    ifeq ($(TOOLCHAIN),GCC_ARM)
+        OPT_FLAGS := -Og -g
+    else
+        OPT_FLAGS := -O0 -g
+    endif
     DEFINES_CFG := -DCOMPONENT_Debug -DDEBUG
 else ifeq ($(CONFIG),Release)
     OPT_FLAGS   := -Os
@@ -107,6 +150,16 @@ else
     DEFINES_CFG := -DCOMPONENT_Debug -DDEBUG
 endif
 
+ifeq ($(TOOLCHAIN),GCC_ARM)
+    # CMSIS-DSP's MVE (Helium) intrinsics rely on lax vector-to-vector
+    # conversions that clang allows by default but GCC does not.
+    TOOLCHAIN_FLAGS  := -flax-vector-conversions
+    TOOLCHAIN_LDLIBS :=
+else
+    TOOLCHAIN_FLAGS  := --target=arm-none-eabi -fintegrated-cc1 -fintegrated-objemitter -DMTB_LLVM_EMBEDDED_ARM
+    TOOLCHAIN_LDLIBS := -lc++ -lc++abi
+endif
+
 COMMON_FLAGS := \
     $(CPU_FLAGS) \
     $(OPT_FLAGS) \
@@ -114,9 +167,7 @@ COMMON_FLAGS := \
     -fdata-sections \
     -fshort-enums \
     -Wall \
-    -fintegrated-cc1 \
-    -fintegrated-objemitter \
-    -DMTB_LLVM_EMBEDDED_ARM
+    $(TOOLCHAIN_FLAGS)
 
 CFLAGS   := $(COMMON_FLAGS) -c -MMD -MP
 CXXFLAGS := $(COMMON_FLAGS) -c -MMD -MP -std=c++17 -fno-exceptions -fno-rtti
@@ -125,7 +176,7 @@ ASFLAGS := \
     $(CPU_FLAGS) \
     $(OPT_FLAGS) \
     -c -MMD -MP \
-    -DMTB_LLVM_EMBEDDED_ARM
+    $(TOOLCHAIN_FLAGS)
 
 LDFLAGS := \
     $(CPU_FLAGS) \
@@ -133,10 +184,11 @@ LDFLAGS := \
     -ffunction-sections \
     -fdata-sections \
     -Wall \
+    $(TOOLCHAIN_FLAGS) \
     -Wl,--gc-sections \
-    -Xlinker -L$(BSP_DIR)/COMPONENT_CM55/TOOLCHAIN_LLVM_ARM \
+    -Xlinker -L$(BSP_DIR)/COMPONENT_CM55/$(TOOLCHAIN_DIR) \
     -Xlinker -L$(APP_DIR)/sources/bsp-cfg \
-    -T$(BSP_DIR)/COMPONENT_CM55/TOOLCHAIN_LLVM_ARM/pse84_ns_cm55.ld \
+    -T$(BSP_DIR)/COMPONENT_CM55/$(TOOLCHAIN_DIR)/pse84_ns_cm55.ld \
     -Wl,-Map,$(BUILD_DIR)/$(APPNAME).map
 
 ################################################################################
@@ -226,7 +278,7 @@ INCLUDES := \
     -I$(LIB_AVC)/lib/SP_ENH/COMPONENT_CM55/MODEL/COMPONENT_ML_TFLM \
     \
     -I$(LIB_CLIB)/include \
-    -I$(LIB_CLIB)/source/TOOLCHAIN_LLVM_ARM \
+    -I$(LIB_CLIB)/source/$(TOOLCHAIN_DIR) \
     \
     -I$(LIB_CMSIS)/Core/Include \
     -I$(LIB_CMSIS)/Core/Include/a-profile \
@@ -245,7 +297,7 @@ INCLUDES := \
     -I$(LIB_CONN_UTILS)/network \
     \
     -I$(LIB_FREERTOS)/Source/include \
-    -I$(LIB_FREERTOS)/Source/portable/COMPONENT_CM55/TOOLCHAIN_LLVM_ARM \
+    -I$(LIB_FREERTOS)/Source/portable/COMPONENT_CM55/$(TOOLCHAIN_DIR) \
     \
     -I$(LIB_ML_MW)/include \
     -I$(LIB_ML_MW)/source/COMPONENT_ML_TFLM \
@@ -283,16 +335,15 @@ INCLUDES := \
     -I$(LIB_VA)/source/va_core
 
 ################################################################################
-# Application source files (board/project-owned)
+# BSP source files
 ################################################################################
 
-APP_C_SRCS := \
-    $(APP_DIR)/sources/audio/audio_enhancement.c \
-    $(APP_DIR)/adapters/deepcraft/wrapper.c \
-    $(APP_DIR)/sources/transport/ipc.c \
-    $(APP_DIR)/sources/audio/pdm_mic.c \
-    $(APP_DIR)/sources/platform/profiler.c \
-    $(APP_DIR)/sources/platform/retarget_io_init.c \
+BSP_C_SRCS := \
+    $(BSP_DIR)/cybsp.c \
+    $(BSP_DIR)/system_edge.c \
+    $(BSP_DIR)/bluetooth/cybsp_bt_config.c \
+    $(BSP_DIR)/COMPONENT_CM55/COMPONENT_NON_SECURE_DEVICE/ns_start_pse84.c \
+    $(BSP_DIR)/COMPONENT_CM55/COMPONENT_NON_SECURE_DEVICE/ns_system_pse84.c \
     $(APP_DIR)/sources/bsp-cfg/cy_afe_configurator_settings.c \
     $(APP_DIR)/sources/bsp-cfg/cycfg.c \
     $(APP_DIR)/sources/bsp-cfg/cycfg_clocks.c \
@@ -303,22 +354,10 @@ APP_C_SRCS := \
     $(APP_DIR)/sources/bsp-cfg/cycfg_protection.c \
     $(APP_DIR)/sources/bsp-cfg/cycfg_qspi_memslot.c \
     $(APP_DIR)/sources/bsp-cfg/cycfg_routing.c \
-    $(APP_DIR)/sources/bsp-cfg/cycfg_system.c \
-    $(SHARED_DIR)/source/COMPONENT_CM55/cm55_ipc_communication.c
-
-################################################################################
-# BSP source files
-################################################################################
-
-BSP_C_SRCS := \
-    $(BSP_DIR)/cybsp.c \
-    $(BSP_DIR)/system_edge.c \
-    $(BSP_DIR)/bluetooth/cybsp_bt_config.c \
-    $(BSP_DIR)/COMPONENT_CM55/COMPONENT_NON_SECURE_DEVICE/ns_start_pse84.c \
-    $(BSP_DIR)/COMPONENT_CM55/COMPONENT_NON_SECURE_DEVICE/ns_system_pse84.c
+    $(APP_DIR)/sources/bsp-cfg/cycfg_system.c
 
 # NOTE: BSP config/GeneratedSource/cycfg*.c are excluded here; the project's
-# bsp-cfg/cycfg*.c files (in APP_C_SRCS) override them to avoid duplicate symbols.
+# bsp-cfg/cycfg*.c files above override them to avoid duplicate symbols.
 
 ################################################################################
 # SDK library source files
@@ -336,44 +375,20 @@ LIB_C_SRCS := \
 LIB_C_SRCS += \
     $(LIB_ASYNC)/source/mtb_async_transfer.c
 
-# audio-front-end
-LIB_C_SRCS += \
-    $(LIB_AFE)/source/cy_afe.c \
-    $(LIB_AFE)/source/cy_afe_audio_bd_calc.c \
-    $(LIB_AFE)/source/cy_afe_audio_debug.c \
-    $(LIB_AFE)/source/cy_afe_audio_process.c \
-    $(LIB_AFE)/source/cy_afe_audio_speech_enh.c \
-    $(LIB_AFE)/source/cy_afe_audio_task.c \
-    $(LIB_AFE)/source/cy_afe_audio_utils.c \
-    $(LIB_AFE)/source/cy_afe_profiler.c \
-    $(LIB_AFE)/source/cy_afe_tuner_commands.c \
-    $(LIB_AFE)/source/cy_afe_tuner_process.c \
-    $(LIB_AFE)/source/cy_afe_tuner_task.c
-
-# audio-voice-core (C sources; C++ model file is in LIB_CXX_SRCS)
-LIB_C_SRCS += \
-    $(LIB_AVC)/lib/SP_ENH/COMPONENT_CM55/src/cy_sp_enh.c \
-    $(LIB_AVC)/lib/SP_ENH/COMPONENT_CM55/src/ifx_pre_post_process.c \
-    $(LIB_AVC)/lib/SP_ENH/COMPONENT_CM55/src/ifx_sp_enh.c \
-    $(LIB_AVC)/lib/SP_ENH/COMPONENT_CM55/src/ifx_sp_enh_process.c \
-    $(LIB_AVC)/lib/SP_ENH/COMPONENT_CM55/src/ifx_sp_utils.c \
-    $(LIB_AVC)/lib/SP_ENH/COMPONENT_CM55/MODEL/COMPONENT_MW_MDL_DSES/DSES_LSTM_tflm_model_int16x8.c \
-    $(LIB_AVC)/lib/SP_ENH/COMPONENT_CM55/MODEL/COMPONENT_MW_MDL_DSNS/DSNS_LSTM_tflm_model_int16x8.c \
-    $(LIB_AVC)/lib/SP_ENH/COMPONENT_CM55/MODEL/COMPONENT_MW_MDL_VA/VA_AM_INT8_tflm_model_int8x8.c
-
-LIB_CXX_SRCS := \
-    $(LIB_AVC)/lib/SP_ENH/COMPONENT_CM55/MODEL/COMPONENT_ML_TFLM/mtb_ml_model_tflm_16x8.cpp
-
-# bt-fw (C stub; actual firmware is a binary blob linked via .hcd)
-LIB_C_SRCS += \
-    $(LIB_BTFW)/COMPONENT_MURATA-2FY/btfw.c
-
-# clib-support
+# clib-support (GCC_ARM/newlib handles FreeRTOS reentrancy in one file;
+# LLVM_ARM/picolibc needs a separate COMPONENT_FREERTOS glue file)
 LIB_C_SRCS += \
     $(LIB_CLIB)/source/cy_time.c \
-    $(LIB_CLIB)/source/COMPONENT_FREERTOS/cy_mutex_pool.c \
+    $(LIB_CLIB)/source/COMPONENT_FREERTOS/cy_mutex_pool.c
+
+ifeq ($(TOOLCHAIN),GCC_ARM)
+LIB_C_SRCS += \
+    $(LIB_CLIB)/source/TOOLCHAIN_GCC_ARM/cy_clib_support_newlib.c
+else
+LIB_C_SRCS += \
     $(LIB_CLIB)/source/TOOLCHAIN_LLVM_ARM/cy_clib_support_llvm_arm_picolibc.c \
     $(LIB_CLIB)/source/TOOLCHAIN_LLVM_ARM/COMPONENT_FREERTOS/cy_clib_support_llvm_arm_freertos.c
+endif
 
 # cmsis-dsp
 CMSIS_DSP_SRCS := $(wildcard $(LIB_CMSIS)/COMPONENT_CMSIS_DSP/Source/*.c) \
@@ -398,20 +413,11 @@ LIB_C_SRCS += \
     $(LIB_FREERTOS)/Source/tasks.c \
     $(LIB_FREERTOS)/Source/timers.c \
     $(LIB_FREERTOS)/Source/portable/MemMang/heap_3.c \
-    $(LIB_FREERTOS)/Source/portable/COMPONENT_CM55/TOOLCHAIN_LLVM_ARM/port.c \
-    $(LIB_FREERTOS)/Source/portable/COMPONENT_CM55/TOOLCHAIN_LLVM_ARM/portasm.c \
-    $(LIB_FREERTOS)/Source/portable/COMPONENT_CM55/TOOLCHAIN_LLVM_ARM/mpu_wrappers_v2_asm.c
+    $(LIB_FREERTOS)/Source/portable/COMPONENT_CM55/$(TOOLCHAIN_DIR)/port.c \
+    $(LIB_FREERTOS)/Source/portable/COMPONENT_CM55/$(TOOLCHAIN_DIR)/portasm.c \
+    $(LIB_FREERTOS)/Source/portable/COMPONENT_CM55/$(TOOLCHAIN_DIR)/mpu_wrappers_v2_asm.c
 
-# ml-middleware
-LIB_C_SRCS += \
-    $(LIB_ML_MW)/source/mtb_ml.c \
-    $(LIB_ML_MW)/source/mtb_ml_nnlite.c \
-    $(LIB_ML_MW)/source/mtb_ml_rtos.c \
-    $(LIB_ML_MW)/source/mtb_ml_utils.c \
-    $(LIB_ML_MW)/source/COMPONENT_U55/mtb_ml_ethosu.c
-
-LIB_CXX_SRCS += \
-    $(LIB_ML_MW)/source/COMPONENT_ML_TFLM/mtb_ml_model.cpp
+# ml-middleware -- moved to framework/deepcraft/Makefile (DEEPCRAFT_LIB_*).
 
 # PSoC Edge PDL drivers (79 of 91; 12 v1-crypto + cy_pdl_srf GC'd in firmware.map)
 LIB_C_SRCS += \
@@ -497,7 +503,7 @@ LIB_C_SRCS += \
 
 # PSoC Edge PDL LLVM assembly
 LIB_S_SRCS := \
-    $(LIB_PSE)/pdl/drivers/source/TOOLCHAIN_LLVM_ARM/cy_syslib_ext.S
+    $(LIB_PSE)/pdl/drivers/source/$(TOOLCHAIN_DIR)/cy_syslib_ext.S
 
 # PSoC Edge PDL device
 LIB_C_SRCS += \
@@ -576,32 +582,20 @@ LIB_C_SRCS += \
     $(LIB_SE_RT)/ifx_se_syscall.c \
     $(LIB_SE_RT)/ifx_se_syscall_builtin.c
 
-# speech-onset-detection
-LIB_C_SRCS += \
-    $(LIB_SOD)/source/cy_sod.c \
-    $(LIB_SOD)/source/cy_sod_private.c \
-    $(LIB_SOD)/source/cy_sod_profiler.c
-
-# voice-assistant
-LIB_C_SRCS += \
-    $(LIB_VA)/source/mtb_nlu.c \
-    $(LIB_VA)/source/mtb_wwd.c \
-    $(LIB_VA)/source/MODELS/AM_LSTM_tflm_model_int16x8.c \
-    $(LIB_VA)/source/MODELS/U55_NMBmodel.c \
-    $(LIB_VA)/source/va_core/va_ml_model.c \
-    $(LIB_VA)/source/va_core/va_timer.c \
-    $(LIB_VA)/source/va_core/va_utils.c
+# speech-onset-detection and voice-assistant -- moved to
+# framework/deepcraft/Makefile (DEEPCRAFT_LIB_C_SRCS).
 
 ################################################################################
 # Pre-built static libraries
 ################################################################################
 
-LDLIBS := \
-    $(LIB_AVC)/lib/SP_ENH/COMPONENT_CM55/COMPONENT_AVC_DEMO/COMPONENT_HARDFP/TOOLCHAIN_LLVM_ARM/ifx_va.a \
-    $(LIB_AVC)/lib/SP_ENH/COMPONENT_CM55/COMPONENT_AVC_DEMO/COMPONENT_HARDFP/TOOLCHAIN_LLVM_ARM/sp_enh.a \
-    $(LIB_TFLM)/COMPONENT_ML_TFLM/COMPONENT_U55/TOOLCHAIN_LLVM_ARM/libtensorflow-microlite.a
+# ifx_va.a/sp_enh.a (audio-voice-core) and libtensorflow-microlite.a
+# (Infineon's prebuilt TFLM, used by DeepCraft's audio pipeline) are
+# DeepCraft-only and TOOLCHAIN_LLVM_ARM-only -- owned by
+# framework/deepcraft/Makefile (DEEPCRAFT_LDLIBS), not board.mk.
+LDLIBS :=
 
-LD_EXTRA_LIBS := -lc++ -lc++abi
+LD_EXTRA_LIBS := $(TOOLCHAIN_LDLIBS)
 
 ################################################################################
 # OpenOCD / flash programming
