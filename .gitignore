@@ -138,6 +138,11 @@ Backup*
 *.REMOTE.*
 *_BACKUP_*.txt
 *_BASE_*.txt
+
+# TFLM: regenerated from the deps/tflm/tflite-micro submodule via
+# `make -f cm55_firmware/framework/tflm/tflm.mk regen-tflm-tree` -- not
+# committed, run that once after cloning (needs network access).
+deps/tflm/tflm_tree/
 *_LOCAL_*.txt
 *_REMOTE_*.txt
 

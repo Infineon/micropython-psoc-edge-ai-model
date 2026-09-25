@@ -11,7 +11,9 @@ include $(BOARD_DIR)/board.mk
 FRAMEWORK_DIR := $(BOARD_DIR)/framework/shared_flash_read
 FRAMEWORK_C_SRCS := $(FRAMEWORK_DIR)/main.c
 
-ALL_C_SRCS   := $(APP_C_SRCS) $(FRAMEWORK_C_SRCS) $(BSP_C_SRCS) $(LIB_C_SRCS)
+# board.mk's BSP_C_SRCS/LIB_C_SRCS/LIB_CXX_SRCS/LDLIBS are already generic
+# (DeepCraft-only libs live in framework/deepcraft/Makefile) -- used as-is.
+ALL_C_SRCS   := $(FRAMEWORK_C_SRCS) $(BSP_C_SRCS) $(LIB_C_SRCS)
 ALL_CXX_SRCS := $(LIB_CXX_SRCS)
 ALL_S_SRCS   := $(LIB_S_SRCS)
 
