@@ -43,7 +43,8 @@ TFLM_TREE := $(REPO_ROOT)/deps/tflm/tflm_tree
 # Upstream tflite-micro runtime (core interpreter, kernels, third-party deps).
 # Kept separate from LIB_C/CXX_SRCS -- compiled into its own tflm-core.a
 # archive instead of linked as loose objects, so the committed prebuilt
-# archive (deps/tflm/prebuilt/, see gen-tflm-core below) can be substituted
+# archive (deps/tflm/prebuilt/, built locally via deps/tflm/build-tflm-core.sh,
+# kept out of the repo -- see .gitignore) can be substituted
 # via TFLM_PREBUILT_CORE_LIB to skip recompiling ~300 files.
 CORE_C_SRCS   := $(shell find $(TFLM_TREE)/third_party -name '*.c' 2>/dev/null)
 CORE_CXX_SRCS := $(shell find $(TFLM_TREE)/tensorflow $(TFLM_TREE)/signal -name '*.cc' 2>/dev/null)
@@ -51,7 +52,8 @@ CORE_CXX_SRCS := $(shell find $(TFLM_TREE)/tensorflow $(TFLM_TREE)/signal -name 
 # board.mk's default LDLIBS is already empty -- nothing to override here.
 
 # deps/tflm/prebuilt/tflm-core.a is a committed, prebuilt archive (built by
-# deps/tflm/build-tflm-core.sh, kept locally only -- see gen-tflm-core below)
+# deps/tflm/build-tflm-core.sh, kept locally only, not committed -- see
+# .gitignore)
 # -- use it automatically instead of rebuilding ~300 tflm_tree files on every
 # clean build. Override entirely with TFLM_PREBUILT_CORE_LIB=/other/path, or
 # unset it to force a from-source build regardless of what's committed here.
@@ -119,7 +121,7 @@ HEX := $(BUILD_DIR)/$(APPNAME).hex
 BIN := $(BUILD_DIR)/$(APPNAME).bin
 
 .PHONY: all build clean deploy tflm-core help \
-        submodule-init regen-tflm-tree require-tflm-tree gen-tflm-core
+        submodule-init regen-tflm-tree require-tflm-tree
 
 all: require-tflm-tree $(HEX) $(BIN)
 build: all
@@ -136,9 +138,6 @@ help:
 	@echo "One-time / maintenance targets:"
 	@echo "  regen-tflm-tree Regenerate deps/tflm/tflm_tree/ (run once after cloning,"
 	@echo "                  or after bumping the tflite-micro submodule)."
-	@echo "  gen-tflm-core   Rebuild deps/tflm/prebuilt/tflm-core.a from a pinned"
-	@echo "                  upstream ref (own network fetch); commit the result."
-	@echo "                  Needs deps/tflm/build-tflm-core.sh (kept locally, not committed)."
 	@echo "  tflm-core       Build just the tflm-core.a archive, not the full app."
 	@echo ""
 	@echo "Useful variables:"
@@ -227,17 +226,6 @@ $(BIN): $(ELF)
 
 clean:
 	$(RM_RF) $(BUILD_DIR)
-
-# --- Maintenance: (re)generate deps/tflm/prebuilt/tflm-core.a --------------
-# Standalone (no submodule/tflm_tree dependency; fetches its own pinned ref
-# over the network) -- deps/tflm/build-tflm-core.sh is kept locally only
-# (not committed, see .gitignore); re-run it and commit the resulting .a
-# whenever its pinned TFLM_REF is bumped. Requires arm-none-eabi-gcc (and
-# git/python3/patch/unzip/wget) on PATH.
-TFLM_PREBUILT_DIR := $(REPO_ROOT)/deps/tflm/prebuilt
-
-gen-tflm-core:
-	env -u MAKEFLAGS -u MFLAGS -u MAKELEVEL bash $(REPO_ROOT)/deps/tflm/build-tflm-core.sh $(TFLM_PREBUILT_DIR) tflm-core.a
 
 deploy: $(ELF)
 	$(call flash_target,$<)
