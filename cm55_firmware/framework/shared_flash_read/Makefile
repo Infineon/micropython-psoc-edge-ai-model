@@ -77,7 +77,6 @@ size: $(ELF)
 clean:
 	$(RM_RF) $(BUILD_DIR)
 
-BUILD ?= $(BUILD_DIR)
 deploy: $(ELF)
 	$(call flash_target,$<)
 
