@@ -5,7 +5,7 @@
 # All hardware/BSP/toolchain config lives in board.mk.
 #
 # Usage:
-#   make [CONFIG=Debug|Release] [DEEPCRAFT_PROJECT=name]
+#   make [CONFIG=Debug|Release] [FRAMEWORK=name] [<framework-specific vars>]
 #   make clean
 #   make deploy
 ################################################################################
@@ -67,7 +67,7 @@ submodules:
 
 help:
 	@echo "Usage:"
-	@echo "  make [CONFIG=Debug|Release] [DEEPCRAFT_PROJECT=name]"
+	@echo "  make [CONFIG=Debug|Release] [FRAMEWORK=name] [<framework-specific vars>]"
 	@echo "  make clean"
 	@echo "  make deploy"
 	@echo "Available frameworks:"

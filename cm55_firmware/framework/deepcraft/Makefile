@@ -38,6 +38,16 @@ DEEPCRAFT_DIR           := $(REPO_ROOT)/deps/deepcraft/micropython-deepcraft-mod
 DEEPCRAFT_FRAMEWORK_DIR := $(BOARD_DIR)/framework/deepcraft
 DEEPCRAFT_VA_MODELS_DIR := $(DEEPCRAFT_FRAMEWORK_DIR)/va_models
 
+# DeepCraft-only library paths -- not generic board/SDK glue, so they live
+# here rather than in board.mk.
+LIB_AFE   := $(PSE_DIR)/audio-front-end
+LIB_AVC   := $(PSE_DIR)/audio-voice-core
+LIB_BTFW  := $(PSE_DIR)/bt-fw-mur-cyw55513
+LIB_ML_MW := $(PSE_DIR)/ml-middleware
+LIB_TFLM  := $(PSE_DIR)/ml-tflite-micro
+LIB_SOD   := $(PSE_DIR)/speech-onset-detection
+LIB_VA    := $(PSE_DIR)/voice-assistant
+
 # DeepCraft-owned application sources (audio pipeline, model adapter, CM33<->CM55
 # IPC) -- not board/BSP config, so they live here rather than in board.mk.
 DEEPCRAFT_APP_C_SRCS := \
@@ -114,7 +124,44 @@ INCLUDES += \
     -I$(DEEPCRAFT_FRAMEWORK_DIR) \
     -I$(DEEPCRAFT_FRAMEWORK_DIR)/audio \
     -I$(DEEPCRAFT_VA_MODELS_DIR)/$(DEEPCRAFT_PROJECT) \
-    -I$(DEEPCRAFT_DIR)
+    -I$(DEEPCRAFT_DIR) \
+    -I$(APP_DIR)/adapters/deepcraft \
+    -I$(LIB_AFE)/include \
+    -I$(LIB_AFE)/source/include \
+    -I$(LIB_AVC)/lib/SP_ENH/COMPONENT_CM55/inc \
+    -I$(LIB_AVC)/lib/SP_ENH/COMPONENT_CM55/src/inc \
+    -I$(LIB_AVC)/lib/SP_ENH/COMPONENT_CM55/MODEL/COMPONENT_ML_TFLM \
+    -I$(LIB_ML_MW)/include \
+    -I$(LIB_ML_MW)/source/COMPONENT_ML_TFLM \
+    -I$(LIB_TFLM)/COMPONENT_ML_TFLM/include \
+    -I$(LIB_TFLM)/COMPONENT_ML_TFLM/include/flatbuffers/include \
+    -I$(LIB_TFLM)/COMPONENT_ML_TFLM/include/gemmlowp \
+    -I$(LIB_TFLM)/COMPONENT_ML_TFLM/include/ethos-u-core-driver \
+    -I$(LIB_SOD)/include \
+    -I$(LIB_SOD)/source/inc \
+    -I$(LIB_VA)/include \
+    -I$(LIB_VA)/source/va_core
+
+# Framework-specific defines (appended to the board DEFINES): AVC/AFE/SOD/VA
+# and ml-middleware component selection, plus this framework's model name.
+DEFINES += \
+    -DCOMPONENT_AVC_DEMO \
+    -DCOMPONENT_ML_INT8x8 \
+    -DCOMPONENT_ML_TFLM \
+    -DCOMPONENT_MW_DSNS_MODEL \
+    -DCOMPONENT_MW_MDL_DSES \
+    -DCOMPONENT_MW_MDL_DSNS \
+    -DCOMPONENT_MW_MDL_VA \
+    -DCY_ML_MODEL_MEM=.cy_socmem_data \
+    -DDSNS_ENABLE_MTB_ML \
+    -DENABLE_AFE_MW_SUPPORT \
+    -DENABLE_IFX_PRE_PROCESS_HPF \
+    -DENABLE_IFX_SOD \
+    -DENABLE_IFX_VA_CMD \
+    -DENABLE_IFX_VA_WWD \
+    -DPROJECT_PREFIX=$(DEEPCRAFT_PROJECT) \
+    -DUSE_AUDIO_ENHANCEMENT \
+    -DUSE_MTB_ML
 
 ################################################################################
 # Collect all objects
@@ -196,8 +243,7 @@ size: $(ELF)
 clean:
 	$(RM_RF) $(BUILD_DIR)
 
-BUILD ?= $(BUILD_DIR)
-deploy: $(BUILD)/$(APPNAME).elf
+deploy: $(ELF)
 	$(call flash_target,$<)
 
 -include $(DEPS)

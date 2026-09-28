@@ -1,13 +1,14 @@
 ################################################################################
 # board.mk — PSoC Edge KIT_PSE84_AI hardware configuration
 #
-# Included by cm55_firmware/Makefile and framework/deepcraft/Makefile.
+# Included by every framework Makefile (framework/*/Makefile or *.mk).
 # All board-specific paths, toolchain, flags, defines, includes, BSP and
-# SDK library sources live here; nothing hardware-specific should appear
-# inside a framework Makefile.
+# SDK library sources live here; this file has no knowledge of any
+# particular framework -- framework-only sources/defines/includes belong in
+# that framework's own Makefile instead.
 #
 # Required inputs (must be set before including this file):
-#   APPNAME, CONFIG, DEEPCRAFT_PROJECT
+#   APPNAME, CONFIG
 #   BOARD_DIR   — absolute path to cm55_firmware/
 #   BUILD_DIR   — absolute path to the build output directory
 ################################################################################
@@ -25,23 +26,20 @@ BSP_DIR    := $(PSE_DIR)/TARGET_KIT_PSE84_AI
 
 LIB_ABS_RTOS    := $(PSE_DIR)/abstraction-rtos
 LIB_ASYNC       := $(PSE_DIR)/async-transfer
-LIB_AFE         := $(PSE_DIR)/audio-front-end
-LIB_AVC         := $(PSE_DIR)/audio-voice-core
-LIB_BTFW        := $(PSE_DIR)/bt-fw-mur-cyw55513
 LIB_CLIB        := $(PSE_DIR)/clib-support
 LIB_CMSIS       := $(PSE_DIR)/cmsis
 LIB_CONN_UTILS  := $(PSE_DIR)/connectivity-utilities
 LIB_CORELIB     := $(PSE_DIR)/core-lib
 LIB_FREERTOS    := $(PSE_DIR)/freertos
-LIB_ML_MW       := $(PSE_DIR)/ml-middleware
-LIB_TFLM        := $(PSE_DIR)/ml-tflite-micro
 LIB_PSE         := $(PSE_DIR)/mtb-dsl-pse8xxgp
 LIB_IPC         := $(PSE_DIR)/mtb-ipc
 LIB_SRF         := $(PSE_DIR)/mtb-srf
 LIB_RETARGET    := $(PSE_DIR)/retarget-io
 LIB_SE_RT       := $(PSE_DIR)/se-rt-services-utils
-LIB_SOD         := $(PSE_DIR)/speech-onset-detection
-LIB_VA          := $(PSE_DIR)/voice-assistant
+
+# DeepCraft-only library paths (audio-front-end, audio-voice-core, bt-fw,
+# ml-middleware, ml-tflite-micro, speech-onset-detection, voice-assistant)
+# are declared in framework/deepcraft/Makefile instead.
 
 ################################################################################
 # Cross-platform shell / clean helpers
@@ -201,22 +199,15 @@ DEFINES := \
     -DCOMPONENT_55500 \
     -DCOMPONENT_55500A1 \
     -DCOMPONENT_APP_KIT_PSE84_AI \
-    -DCOMPONENT_AVC_DEMO \
     -DCOMPONENT_CM55 \
     -DCOMPONENT_CM55_0 \
     -DCOMPONENT_CMSIS_DSP \
     -DCOMPONENT_FREERTOS \
     -DCOMPONENT_HARDFP \
     -DCOMPONENT_LLVM_ARM \
-    -DCOMPONENT_ML_INT8x8 \
-    -DCOMPONENT_ML_TFLM \
     -DCOMPONENT_MTB_DEVICE_SUPPORT \
     -DCOMPONENT_MTB_HAL \
     -DCOMPONENT_MW_ASYNC_TRANSFER \
-    -DCOMPONENT_MW_DSNS_MODEL \
-    -DCOMPONENT_MW_MDL_DSES \
-    -DCOMPONENT_MW_MDL_DSNS \
-    -DCOMPONENT_MW_MDL_VA \
     -DCOMPONENT_MW_MTB_DSL_PSE8XXGP \
     -DCOMPONENT_MW_MTB_IPC \
     -DCOMPONENT_MW_MTB_SRF \
@@ -228,27 +219,20 @@ DEFINES := \
     -DCORE_NAME_CM55_0=1 \
     -DCYBSP_MCUBOOT_HEADER_SIZE=0x400 \
     -DCY_APPNAME_$(APPNAME) \
-    -DCY_ML_MODEL_MEM=.cy_socmem_data \
     -DCY_RETARGET_IO_CONVERT_LF_TO_CRLF \
     -DCY_RTOS_AWARE \
     -DCY_SUPPORTS_DEVICE_VALIDATION \
     -DCY_TARGET_BOARD=APP_KIT_PSE84_AI \
-    -DDSNS_ENABLE_MTB_ML \
-    -DENABLE_AFE_MW_SUPPORT \
-    -DENABLE_IFX_PRE_PROCESS_HPF \
-    -DENABLE_IFX_SOD \
-    -DENABLE_IFX_VA_CMD \
-    -DENABLE_IFX_VA_WWD \
-    -DPROJECT_PREFIX=$(DEEPCRAFT_PROJECT) \
     -DPSE846GPS2DBZC4A \
     -DTARGET_KIT_PSE84_AI \
     -DTF_LITE_STATIC_MEMORY \
     -DTRXV5 \
-    -DUSE_AUDIO_ENHANCEMENT \
     -DUSE_KIT_PSE84_AI \
-    -DUSE_MTB_ML \
     -DFLASH_BOOT \
     -DCY_PDL_FLASH_BOOT
+
+# DeepCraft-only defines (AVC/AFE/SOD/VA/ml-middleware component selection,
+# DEEPCRAFT_PROJECT name) live in framework/deepcraft/Makefile instead.
 
 ################################################################################
 # Include paths
@@ -259,7 +243,6 @@ INCLUDES := \
     -I$(APP_DIR)/includes \
     -I$(APP_DIR)/sources \
     -I$(APP_DIR)/sources/bsp-cfg \
-    -I$(APP_DIR)/adapters/deepcraft \
     -I$(SHARED_DIR)/include \
     \
     -I$(BSP_DIR) \
@@ -269,13 +252,6 @@ INCLUDES := \
     -I$(LIB_ABS_RTOS)/include/COMPONENT_FREERTOS \
     \
     -I$(LIB_ASYNC)/include \
-    \
-    -I$(LIB_AFE)/include \
-    -I$(LIB_AFE)/source/include \
-    \
-    -I$(LIB_AVC)/lib/SP_ENH/COMPONENT_CM55/inc \
-    -I$(LIB_AVC)/lib/SP_ENH/COMPONENT_CM55/src/inc \
-    -I$(LIB_AVC)/lib/SP_ENH/COMPONENT_CM55/MODEL/COMPONENT_ML_TFLM \
     \
     -I$(LIB_CLIB)/include \
     -I$(LIB_CLIB)/source/$(TOOLCHAIN_DIR) \
@@ -299,14 +275,6 @@ INCLUDES := \
     -I$(LIB_FREERTOS)/Source/include \
     -I$(LIB_FREERTOS)/Source/portable/COMPONENT_CM55/$(TOOLCHAIN_DIR) \
     \
-    -I$(LIB_ML_MW)/include \
-    -I$(LIB_ML_MW)/source/COMPONENT_ML_TFLM \
-    \
-    -I$(LIB_TFLM)/COMPONENT_ML_TFLM/include \
-    -I$(LIB_TFLM)/COMPONENT_ML_TFLM/include/flatbuffers/include \
-    -I$(LIB_TFLM)/COMPONENT_ML_TFLM/include/gemmlowp \
-    -I$(LIB_TFLM)/COMPONENT_ML_TFLM/include/ethos-u-core-driver \
-    \
     -I$(LIB_PSE)/device-utils/syspm/hobto/pdm_pcm/audioss_pdm \
     -I$(LIB_PSE)/device-utils/syspm/hobto/pdm_pcm/mxpdm \
     -I$(LIB_PSE)/device-utils/syspm/include \
@@ -326,13 +294,11 @@ INCLUDES := \
     \
     -I$(LIB_RETARGET)/include \
     \
-    -I$(LIB_SE_RT) \
-    \
-    -I$(LIB_SOD)/include \
-    -I$(LIB_SOD)/source/inc \
-    \
-    -I$(LIB_VA)/include \
-    -I$(LIB_VA)/source/va_core
+    -I$(LIB_SE_RT)
+
+# DeepCraft-only include paths (adapters/deepcraft, AFE, AVC, ml-middleware,
+# LIB_TFLM's prebuilt-TFLM headers, SOD, VA) live in
+# framework/deepcraft/Makefile instead.
 
 ################################################################################
 # BSP source files
@@ -622,7 +588,7 @@ OPENOCD_CLOSE_CMDS = \
     -c "reset run; shutdown"
 
 define flash_target
-    $(Q)$(OPENOCD) \
+    $(OPENOCD) \
         $(OPENOCD_OPEN_CMDS) \
         -c "flash write_image erase $(1)" \
         $(OPENOCD_CLOSE_CMDS)

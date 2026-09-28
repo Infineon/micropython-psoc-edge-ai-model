@@ -72,14 +72,7 @@ DEFINES += -DCMSIS_NN
 # fine since this demo doesn't rely on TFLM's built-in cycle-count profiling.
 DEFINES += -DPROJECT_GENERATION
 
-# LIB_TFLM (Infineon's prebuilt ml-tflite-micro) ships its own copies of
-# tensorflow/, flatbuffers/, gemmlowp/, signal/ headers under the same
-# relative paths as our TFLM_TREE -- if left on the search path, the
-# compiler could silently pick Infineon's (different-version) headers ahead
-# of the ones matching our pinned tflite-micro commit. The DeepCraft
-# adapter/AFE/AVC/SOD/VA/ML-middleware include paths don't share any header
-# names with tflm_tree, so they're harmless to leave in and aren't filtered.
-INCLUDES := $(filter-out -I$(LIB_TFLM)%, $(INCLUDES)) \
+INCLUDES += \
     -I$(TFLM_TREE) \
     -I$(TFLM_TREE)/third_party/flatbuffers/include \
     -I$(TFLM_TREE)/third_party/gemmlowp \
@@ -125,8 +118,7 @@ HEX := $(BUILD_DIR)/$(APPNAME).hex
 BIN := $(BUILD_DIR)/$(APPNAME).bin
 
 .PHONY: all build clean deploy tflm-core help \
-        from-source from-prebuilt \
-        submodule-init regen-tflm-tree require-tflm-tree require-prebuilt-core gen-tflm-core
+        submodule-init regen-tflm-tree require-tflm-tree gen-tflm-core
 
 all: require-tflm-tree $(HEX) $(BIN)
 build: all
@@ -136,11 +128,7 @@ help:
 	@echo ""
 	@echo "Everyday targets:"
 	@echo "  all, build      Build hex+bin (default). Uses the committed prebuilt"
-	@echo "                  tflm-core.a if present, else compiles from tflm_tree/."
-	@echo "  from-prebuilt   Same as above but fails loudly if no prebuilt archive"
-	@echo "                  is available, instead of silently compiling from source."
-	@echo "  from-source     Regenerate tflm_tree/ from the tflite-micro submodule"
-	@echo "                  and force a full from-source build (ignores any prebuilt)."
+	@echo "                  tflm-core.a if present, else compiles tflm_tree/ from source."
 	@echo "  deploy          Build and flash via OpenOCD."
 	@echo "  clean           Remove the build directory."
 	@echo ""
@@ -166,14 +154,13 @@ require-tflm-tree:
 		exit 1; \
 	}
 
-# --- (a) Build from the deps/tflm/tflite-micro submodule -------------------
+# --- Build from the deps/tflm/tflite-micro submodule -----------------------
 # Ensures the submodule is checked out at the commit pinned in this repo's
-# git index, regenerates deps/tflm/tflm_tree from that local checkout (no
-# network fetch beyond the submodule clone), then re-invokes make for a
-# fresh from-source build (TFLM_PREBUILT_CORE_LIB= forces the prebuilt
-# archive off; a fresh `make` process is required so this file's own
-# `$(shell find $(TFLM_TREE) ...)` source lists are recomputed against the
-# just-regenerated tree instead of the one seen when this invocation started).
+# git index, then regenerates deps/tflm/tflm_tree from that local checkout
+# (no network fetch beyond the submodule clone). Run once after cloning or
+# after bumping the submodule; then just `make -f tflm.mk` as usual (pass
+# TFLM_PREBUILT_CORE_LIB= to force recompiling the freshly-regenerated tree
+# instead of using the committed prebuilt archive).
 TFLM_SUBMODULE_DIR := $(REPO_ROOT)/deps/tflm/tflite-micro
 
 submodule-init:
@@ -185,24 +172,6 @@ regen-tflm-tree: submodule-init
 		python3 tensorflow/lite/micro/tools/project_generation/create_tflm_tree.py \
 			$(TFLM_TREE) \
 			--makefile_options="TARGET=cortex_m_generic TARGET_ARCH=cortex-m55 OPTIMIZED_KERNEL_DIR=cmsis_nn TOOLCHAIN=armclang TENSORFLOW_ROOT="
-
-from-source: regen-tflm-tree
-	$(MAKE) -f tflm.mk all \
-		BOARD_DIR=$(BOARD_DIR) BUILD_DIR=$(BUILD_DIR) CONFIG=$(CONFIG) \
-		TFLM_PREBUILT_CORE_LIB=
-
-# --- (b) Build using the committed prebuilt deps/tflm/prebuilt/tflm-core.a -
-# Never compiles tflm_tree/ -- just links FRAMEWORK/APP/LIB objects plus the
-# existing archive and produces the hex. Fails loudly if no prebuilt archive
-# is available (run `make gen-tflm-core` to create one first).
-require-prebuilt-core:
-	@test -n "$(TFLM_PREBUILT_CORE_LIB)" -a -f "$(TFLM_CORE_LIB)" || { \
-		echo "error: no prebuilt tflm-core.a found (looked for $(TFLM_PREBUILT_CORE_LIB_DEFAULT))." >&2; \
-		echo "Run 'make gen-tflm-core' to build and commit one, or pass TFLM_PREBUILT_CORE_LIB=/path/to/tflm-core.a" >&2; \
-		exit 1; \
-	}
-
-from-prebuilt: require-prebuilt-core all
 
 tflm-core: $(TFLM_CORE_LIB)
 
@@ -267,7 +236,6 @@ TFLM_PREBUILT_DIR := $(REPO_ROOT)/deps/tflm/prebuilt
 gen-tflm-core:
 	env -u MAKEFLAGS -u MFLAGS -u MAKELEVEL bash $(REPO_ROOT)/deps/tflm/build-tflm-core.sh $(TFLM_PREBUILT_DIR) tflm-core.a
 
-BUILD ?= $(BUILD_DIR)
 deploy: $(ELF)
 	$(call flash_target,$<)
 
