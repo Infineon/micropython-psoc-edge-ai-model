@@ -48,8 +48,6 @@ LIB_TFLM  := $(PSE_DIR)/ml-tflite-micro
 LIB_SOD   := $(PSE_DIR)/speech-onset-detection
 LIB_VA    := $(PSE_DIR)/voice-assistant
 
-# DeepCraft-owned application sources (audio pipeline, model adapter, CM33<->CM55
-# IPC) -- not board/BSP config, so they live here rather than in board.mk.
 DEEPCRAFT_APP_C_SRCS := \
     $(APP_DIR)/sources/audio/audio_enhancement.c \
     $(APP_DIR)/adapters/deepcraft/wrapper.c \
