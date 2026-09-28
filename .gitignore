@@ -144,7 +144,7 @@ Backup*
 # committed, run that once after cloning (needs network access).
 deps/tflm/tflm_tree/
 
-# TFLM: kept locally only, not pushed -- used to regenerate the committed
+# TFLM: kept locally only, not pushed -- used to generate when needed committed
 # deps/tflm/prebuilt/tflm-core.a whenever TFLM_REF is bumped (see
 # `make -f cm55_firmware/framework/tflm/tflm.mk gen-tflm-core`).
 deps/tflm/build-tflm-core.sh
