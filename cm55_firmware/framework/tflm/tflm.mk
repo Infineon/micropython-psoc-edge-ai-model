@@ -85,7 +85,10 @@ INCLUDES += \
     -I$(TFLM_TREE)/third_party/cmsis_nn/Include
 
 FRAMEWORK_DIR := $(BOARD_DIR)/framework/tflm
-FRAMEWORK_C_SRCS := $(FRAMEWORK_DIR)/main.c
+FRAMEWORK_C_SRCS := \
+    $(FRAMEWORK_DIR)/main.c \
+    $(APP_DIR)/sources/transport/ipc.c \
+    $(SHARED_DIR)/source/COMPONENT_CM55/cm55_ipc_communication.c
 FRAMEWORK_CXX_SRCS := $(FRAMEWORK_DIR)/tflm_runner.cpp
 
 INCLUDES += \
