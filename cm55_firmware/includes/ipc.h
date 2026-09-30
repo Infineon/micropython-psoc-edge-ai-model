@@ -22,14 +22,24 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include "deepcraft_interface.h"   /* from deepcraft-model-interface/src/    */
+#include <stdbool.h>
+
+/*
+ * Generic transport vtable — the plug-in point for inter-core link implementations.
+ */
+typedef struct transport_interface_s transport_interface_t;
+struct transport_interface_s {
+    bool (*send)(transport_interface_t *self, uint8_t cmd, uint32_t value);
+    void (*register_receive_cb)(transport_interface_t *self,
+                                void (*cb)(uint8_t cmd, uint32_t value));
+};
 
 /*
  * IPC transport instance.
- * `base` MUST be first — allows cast to deepcraft_interface_t *.
+ * `base` MUST be first — allows cast to transport_interface_t *.
  */
 typedef struct {
-    deepcraft_interface_t  base;       /* vtable — MUST be first      */
+    transport_interface_t  base;       /* vtable — MUST be first      */
     void (*on_receive)(uint8_t cmd, uint32_t value);  /* ISR relay    */
 } ipc_interface_t;
 

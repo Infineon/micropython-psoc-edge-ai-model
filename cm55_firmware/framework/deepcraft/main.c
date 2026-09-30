@@ -201,7 +201,9 @@ int main(void)
 
     /* Initialise the DeepCraft model interface (transport configured inside) */
     ipc_interface_init(&g_ipc_interface);
-    deepcraft_wrapper_init(&g_ipc_interface.base, on_va_start, on_va_stop);
+    /* base is layout-compatible with deepcraft_interface_t (see ipc.h). */
+    deepcraft_wrapper_init((deepcraft_interface_t *)&g_ipc_interface.base,
+        on_va_start, on_va_stop);
 
     result = xTaskCreate(ipc_task, IPC_TASK_NAME, IPC_TASK_STACK_SIZE,
         NULL, IPC_TASK_PRIORITY, &g_ipc_task_hdl);
