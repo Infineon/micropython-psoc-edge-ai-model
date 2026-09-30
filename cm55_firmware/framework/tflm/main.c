@@ -41,11 +41,20 @@ static void blink_led(GPIO_PRT_Type *port, uint32_t pin)
     }
 }
 
+/* y values coalesced into a single reply doorbell (bounds the on-stack buffer). */
+#define TFLM_REPLY_BATCH_MAX (64U)
+
 /* Bulk-data sink (runs in the IPC task context for each drained H2T chunk).
- * The stream is scalar float32 records -- one inference and one
- * float32 y reply per x received from CM33. */
+ * Each x record is inferenced in order; the y results are coalesced and streamed
+ * back in as few reply doorbells as possible (one per <=TFLM_REPLY_BATCH_MAX
+ * records). A scalar (single-record) chunk collapses to one y in one doorbell,
+ * so this handles both scalar and batched CM33 streams unchanged. */
 static void on_x_data(const uint8_t *data, size_t len)
 {
+    float y_batch[TFLM_REPLY_BATCH_MAX];
+    size_t n = 0U;
+
+    Cy_GPIO_Write(CYBSP_LED_RGB_GREEN_PORT, CYBSP_LED_RGB_GREEN_PIN, CYBSP_LED_STATE_ON);
     for (size_t i = 0U; i + sizeof(float) <= len; i += sizeof(float)) {
         float x;
         memcpy(&x, &data[i], sizeof x);
@@ -56,11 +65,16 @@ static void on_x_data(const uint8_t *data, size_t len)
             }
         }
 
-        Cy_GPIO_Write(CYBSP_LED_RGB_GREEN_PORT, CYBSP_LED_RGB_GREEN_PIN, CYBSP_LED_STATE_ON);
-        float y = g_tflm_result.y;
-        ipc_interface_send_data((const uint8_t *)&y, sizeof y);
-        Cy_GPIO_Write(CYBSP_LED_RGB_GREEN_PORT, CYBSP_LED_RGB_GREEN_PIN, CYBSP_LED_STATE_OFF);
+        y_batch[n++] = g_tflm_result.y;
+        if (n == TFLM_REPLY_BATCH_MAX) {
+            ipc_interface_send_data((const uint8_t *)y_batch, n * sizeof(float));
+            n = 0U;
+        }
     }
+    if (n > 0U) {
+        ipc_interface_send_data((const uint8_t *)y_batch, n * sizeof(float));
+    }
+    Cy_GPIO_Write(CYBSP_LED_RGB_GREEN_PORT, CYBSP_LED_RGB_GREEN_PIN, CYBSP_LED_STATE_OFF);
 }
 
 /* Doorbell-driven: the pipe ISR wakes this task, which drains the H2T ring
