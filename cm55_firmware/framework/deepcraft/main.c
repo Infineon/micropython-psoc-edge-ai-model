@@ -22,6 +22,17 @@
 
 #include "wrapper.h"
 
+/* The deepcraft path casts g_ipc_interface.base (transport_interface_t) to
+ * deepcraft_interface_t *; guard that the two vtables stay layout-identical. */
+_Static_assert(sizeof(transport_interface_t) == sizeof(deepcraft_interface_t),
+    "transport_interface_t and deepcraft_interface_t must have identical size");
+_Static_assert(offsetof(transport_interface_t, send)
+        == offsetof(deepcraft_interface_t, send),
+    "send vtable slot must be at the same offset in both interfaces");
+_Static_assert(offsetof(transport_interface_t, register_receive_cb)
+        == offsetof(deepcraft_interface_t, register_receive_cb),
+    "register_receive_cb vtable slot must be at the same offset in both interfaces");
+
 #define VA_TASK_NAME         ("va-task")
 #define VA_TASK_STACK_SIZE   (10 * 1024)
 #define VA_TASK_PRIORITY     (CY_RTOS_PRIORITY_NORMAL)
@@ -201,7 +212,10 @@ int main(void)
 
     /* Initialise the DeepCraft model interface (transport configured inside) */
     ipc_interface_init(&g_ipc_interface);
-    deepcraft_wrapper_init(&g_ipc_interface.base, on_va_start, on_va_stop);
+    /* base is layout-compatible with deepcraft_interface_t (enforced by the
+     * _Static_assert checks at the top of this file). */
+    deepcraft_wrapper_init((deepcraft_interface_t *)&g_ipc_interface.base,
+        on_va_start, on_va_stop);
 
     result = xTaskCreate(ipc_task, IPC_TASK_NAME, IPC_TASK_STACK_SIZE,
         NULL, IPC_TASK_PRIORITY, &g_ipc_task_hdl);
