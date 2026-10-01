@@ -141,7 +141,7 @@ static void ipc_rx_callback(uint32_t *msg_data)
 }
 
 /* ── vtable: send ────────────────────────────────────────────────────────── */
-static bool ipc_send(deepcraft_interface_t *self, uint8_t cmd, uint32_t value)
+static bool ipc_send(ipc_transport_vtable_t *self, uint8_t cmd, uint32_t value)
 {
     (void)self;
     cy_en_ipc_pipe_status_t status;
@@ -167,8 +167,8 @@ static bool ipc_send(deepcraft_interface_t *self, uint8_t cmd, uint32_t value)
     return false;
 }
 
-/* ── vtable: register_receive_cb for deepcraft_interface ─────────────────────────── */
-static void ipc_register_receive_cb(deepcraft_interface_t *self,
+/* ── vtable: register_receive_cb ──────────────────────────────────────────── */
+static void ipc_register_receive_cb(ipc_transport_vtable_t *self,
     void (*cb)(uint8_t cmd, uint32_t value))
 {
     ipc_interface_t *iface = (ipc_interface_t *)self;

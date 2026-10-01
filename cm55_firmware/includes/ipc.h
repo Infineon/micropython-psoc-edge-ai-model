@@ -1,17 +1,17 @@
 /*
- * ipc.h — IPC transport implementation of deepcraft_interface_t
- *          (target / C-application side, PSoC Edge IPC pipe).
+ * ipc.h — Generic IPC transport (target / C-application side, PSoC Edge IPC
+ *         pipe).
  *
- * Included only by adapters/deepcraft/wrapper.c — application code (main.c)
- * must NOT include this file directly; use wrapper.h instead.
+ * Used by adapters/deepcraft/wrapper.c and any other adapter needing the
+ * IPC pipe; not tied to any particular adapter's protocol.
  *
  * Provides:
  *   ipc_interface_init()  — sets up IPC pipe and registers callbacks
  *   ipc_notify_*()        — send VA events to the host
  *
- * To swap transports, only adapters/deepcraft/wrapper.c needs to change: replace the
- * include of this header and the init call.  The vtable contract
- * (deepcraft_interface_t) is unchanged.
+ * To swap transports, only adapters/deepcraft/wrapper.c needs to change:
+ * replace the include of this header and the init call. The vtable
+ * contract (ipc_transport_vtable_t) is unchanged.
  *
  * Copyright (c) 2026 Infineon Technologies AG
  * SPDX-License-Identifier: MIT
@@ -20,16 +20,29 @@
 #ifndef IPC_H
 #define IPC_H
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
-#include "deepcraft_interface.h"   /* from deepcraft-model-interface/src/    */
+
+/*
+ * Minimal two-function transport vtable. Deliberately not deepcraft_interface_t:
+ * this header has no DeepCraft dependency, even though deepcraft_interface_t
+ * has the same shape and adapters/deepcraft/main.c relies on that to reinterpret
+ * ipc_interface_t::base as one (see the cast there).
+ */
+typedef struct ipc_transport_vtable_s ipc_transport_vtable_t;
+struct ipc_transport_vtable_s {
+    bool (*send)(ipc_transport_vtable_t *self, uint8_t cmd, uint32_t value);
+    void (*register_receive_cb)(ipc_transport_vtable_t *self,
+        void (*cb)(uint8_t cmd, uint32_t value));
+};
 
 /*
  * IPC transport instance.
- * `base` MUST be first — allows cast to deepcraft_interface_t *.
+ * `base` MUST be first — allows cast to ipc_transport_vtable_t *.
  */
 typedef struct {
-    deepcraft_interface_t  base;       /* vtable — MUST be first      */
+    ipc_transport_vtable_t base;       /* vtable — MUST be first      */
     void (*on_receive)(uint8_t cmd, uint32_t value);  /* ISR relay    */
 } ipc_interface_t;
 
