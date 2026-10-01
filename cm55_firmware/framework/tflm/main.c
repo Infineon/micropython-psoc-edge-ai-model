@@ -111,7 +111,10 @@ int main(void)
      * y is streamed back via ipc_interface_send_data() from on_x_data(). */
     ipc_interface_init(&g_ipc_interface);
     ipc_interface_set_data_cb(on_x_data);
-    CY_ASSERT(ipc_interface_register_client(CM55_IPC_PIPE_CLIENT_ID, NULL));
+    
+    bool client_registered = ipc_interface_register_client(CM55_IPC_PIPE_CLIENT_ID, NULL);
+    CY_ASSERT(client_registered);
+    (void)client_registered;
 
     BaseType_t task_result = xTaskCreate(tflm_ipc_task, IPC_TASK_NAME,
         IPC_TASK_STACK_SIZE, NULL, IPC_TASK_PRIORITY, &g_ipc_task_hdl);

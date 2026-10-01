@@ -1,17 +1,23 @@
 /*
- * ipc.h — IPC transport implementation of deepcraft_interface_t
- *          (target / C-application side, PSoC Edge IPC pipe).
+ * ipc.h — IPC transport over the PSoC Edge IPC pipe (target / C-application
+ *          side), exposing the generic transport_interface_t vtable.
  *
- * Included only by adapters/deepcraft/wrapper.c — application code (main.c)
- * must NOT include this file directly; use wrapper.h instead.
+ * Included directly by application code that drives the IPC transport itself
+ * (e.g. framework/tflm/main.c for bulk x/y streaming). The DeepCraft path
+ * instead goes through adapters/deepcraft/wrapper.c, which casts the
+ * transport_interface_t vtable to its own deepcraft_interface_t (the two
+ * vtables are layout-identical; see the _Static_asserts in
+ * framework/deepcraft/main.c).
  *
  * Provides:
- *   ipc_interface_init()  — sets up IPC pipe and registers callbacks
- *   ipc_notify_*()        — send VA events to the host
+ *   ipc_interface_init()         — sets up the IPC pipe and the T2H ring
+ *   ipc_interface_send_data()    — stream bytes target -> host
+ *   ipc_interface_set_data_cb()  — register a host -> target bulk-data sink
+ *   ipc_interface_register_client() / ipc_interface_send_command()
+ *                                — per-client command channel
  *
- * To swap transports, only adapters/deepcraft/wrapper.c needs to change: replace the
- * include of this header and the init call.  The vtable contract
- * (deepcraft_interface_t) is unchanged.
+ * To swap transports, implement a new transport_interface_t (send +
+ * register_receive_cb) in a separate file; callers are otherwise unchanged.
  *
  * Copyright (c) 2026 Infineon Technologies AG
  * SPDX-License-Identifier: MIT
@@ -46,9 +52,8 @@ typedef struct {
 /*
  * ipc_interface_init
  *
- * Sets up the IPC pipe, registers the ISR receive callback, and stores the
- * on_start / on_stop application callbacks.
- * Call once at boot, before starting the RTOS scheduler.
+ * Populates the transport vtable, initialises the target -> host ring, and
+ * sets up the IPC pipe. Call once at boot, before starting the RTOS scheduler.
  */
 void ipc_interface_init(ipc_interface_t *self);
 
