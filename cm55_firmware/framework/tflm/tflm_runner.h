@@ -1,42 +1,53 @@
-#ifndef TFLM_RESULT_H
-#define TFLM_RESULT_H
+/*
+ * tflm_runner.h — Generic tflite::MicroInterpreter wrapper.
+ *
+ * Model-agnostic: the caller hands it a flash-mapped (XIP) buffer holding
+ * an arbitrary .tflite model plus raw, model-owner-formatted tensor bytes,
+ * and gets raw tensor bytes back. No assumptions about tensor shape/dtype
+ * beyond what the flashed model itself declares. Only single-input/
+ * single-output models are supported (tensor index 0 on each side) --
+ * sufficient for the small on-device models this framework targets; models
+ * with multiple I/O tensors need a richer framing than a flat byte buffer
+ * and are out of scope here.
+ *
+ * Copyright (c) 2026 Infineon Technologies AG
+ * SPDX-License-Identifier: MIT
+ */
+
+#ifndef TFLM_RUNNER_H
+#define TFLM_RUNNER_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
-
-#define TFLM_RESULT_MAGIC        (0x54464C4DUL)
-
-/* status codes:
- *   1 = initializing
- *   2 = bad TFLite schema
- *   3 = AllocateTensors failed
- *   4 = input setup failed
- *   5 = Invoke failed
- *   6 = output read failed
- *   0 = running normally; check `generation` for a new sample
- */
-typedef struct __attribute__((packed)) {
-    uint32_t magic;
-    uint32_t status;
-    uint32_t generation;
-    float x;
-    float y;
-    int32_t raw_y;
-    uint32_t output_type;
-    int32_t output_zero_point;
-    float output_scale;
-} tflm_demo_result_t;
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-extern tflm_demo_result_t g_tflm_result;
-bool tflm_init(const uint8_t *model_data);
-bool tflm_step(float x);
+/* Parse the model at `model_data` (flash-mapped/XIP, zero-copy) and allocate
+ * its tensors. Safe to call again after tflm_runner_unload() to load a
+ * different model. Returns false on a bad schema version or if tensor
+ * allocation fails; the runner remains unloaded in that case. */
+bool tflm_runner_load(const uint8_t *model_data);
+
+/* Release the current interpreter so a new model can be loaded. No-op if
+ * nothing is loaded. */
+void tflm_runner_unload(void);
+
+bool tflm_runner_is_loaded(void);
+
+/* Copy `len` bytes into input tensor 0 (rejected if it doesn't match the
+ * tensor's byte size), run inference, then copy output tensor 0's raw bytes
+ * into `out` (up to `out_capacity`). `*out_len` receives the number of bytes
+ * written. Returns false if no model is loaded, the input size doesn't
+ * match, invocation fails, or the output doesn't fit in `out_capacity`. */
+bool tflm_runner_invoke(const uint8_t *data, size_t len,
+    uint8_t *out, size_t out_capacity, size_t *out_len);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif
+#endif /* TFLM_RUNNER_H */
+

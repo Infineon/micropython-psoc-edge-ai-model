@@ -85,11 +85,23 @@ INCLUDES += \
     -I$(TFLM_TREE)/third_party/cmsis_nn/Include
 
 FRAMEWORK_DIR := $(BOARD_DIR)/framework/tflm
-FRAMEWORK_C_SRCS := $(FRAMEWORK_DIR)/main.c
+TFLM_ADAPTER_DIR := $(APP_DIR)/adapters/tflm
+
+# adapters/tflm/tflm_engine.c (protocol/state machine) + the board's generic
+# IPC transport (sources/transport/ipc.c + shared/source's CM55 pipe setup)
+# -- these are not tflm-specific, but this framework is what decides it
+# needs the IPC transport at all (see framework/tflm/main.c's tflm_transport_t
+# implementation). Deliberately does not touch adapters/deepcraft.
+FRAMEWORK_C_SRCS := \
+    $(FRAMEWORK_DIR)/main.c \
+    $(TFLM_ADAPTER_DIR)/tflm_engine.c \
+    $(APP_DIR)/sources/transport/ipc.c \
+    $(SHARED_DIR)/source/COMPONENT_CM55/cm55_ipc_communication.c
 FRAMEWORK_CXX_SRCS := $(FRAMEWORK_DIR)/tflm_runner.cpp
 
 INCLUDES += \
-    -I$(FRAMEWORK_DIR)
+    -I$(FRAMEWORK_DIR) \
+    -I$(TFLM_ADAPTER_DIR)
 
 ALL_C_SRCS   := $(FRAMEWORK_C_SRCS) $(BSP_C_SRCS) $(LIB_C_SRCS)
 ALL_CXX_SRCS := $(FRAMEWORK_CXX_SRCS) $(LIB_CXX_SRCS)
