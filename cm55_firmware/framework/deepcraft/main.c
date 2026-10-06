@@ -23,9 +23,9 @@
 #include "wrapper.h"
 
 /* The deepcraft path casts g_ipc_interface.base (transport_interface_t) to
- * deepcraft_interface_t *; guard that the two vtables stay layout-identical. */
-_Static_assert(sizeof(transport_interface_t) == sizeof(deepcraft_interface_t),
-    "transport_interface_t and deepcraft_interface_t must have identical size");
+ * deepcraft_interface_t *; transport_interface_t has extra (TFLM-only)
+ * trailing members, so guard only that the shared send/register_receive_cb
+ * prefix stays layout-identical -- that's all deepcraft_interface_t reads. */
 _Static_assert(offsetof(transport_interface_t, send)
         == offsetof(deepcraft_interface_t, send),
     "send vtable slot must be at the same offset in both interfaces");

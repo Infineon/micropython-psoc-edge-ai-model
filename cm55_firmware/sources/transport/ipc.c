@@ -1,13 +1,16 @@
 /*
- * ipc.c — IPC transport implementation of deepcraft_interface_t
+ * ipc.c — IPC transport implementation of transport_interface_t
  *          (target / C-application side, PSoC Edge IPC pipe).
  *
- * Implements the two vtable function pointers (send, register_receive_cb) and
- * the notify_* API so deepcraft_target.c contains zero raw IPC or PDL calls.
+ * Implements every transport_interface_t vtable slot (send, register_receive_cb,
+ * send_data, set_data_cb, set_process_task, process) plus the multi-client
+ * command channel, so that no framework's main.c ever needs to write
+ * IPC-specific glue of its own -- they just call
+ * ipc_interface_init() and get a fully-populated transport back.
  *
  * To use a different transport, create a new transport file that fills in a
- * deepcraft_interface_t with its own send / register_receive_cb and exposes
- * the same init + notify_* signatures.  deepcraft_target.c is unchanged.
+ * transport_interface_t with its own six functions and exposes the same
+ * init + notify_* signatures. Application files are unchanged.
  *
  * Copyright (c) 2026 Infineon Technologies AG
  * SPDX-License-Identifier: MIT
@@ -178,6 +181,36 @@ static void ipc_register_receive_cb(transport_interface_t *self,
         (uint32_t)CM55_IPC_PIPE_CLIENT_ID);
 }
 
+/* ── vtable: bulk data slots -- thin forwards to the free functions below ── */
+static size_t ipc_vtable_send_data(const uint8_t *data, size_t len)
+{
+    return ipc_interface_send_data(data, len);
+}
+
+static void ipc_vtable_set_data_cb(void (*cb)(const uint8_t *data, size_t len))
+{
+    ipc_interface_set_data_cb(cb);
+}
+
+static void ipc_vtable_set_process_task(void *task_handle)
+{
+    ipc_interface_set_process_task(task_handle);
+}
+
+static void ipc_vtable_process(void)
+{
+    ipc_interface_process();
+}
+
+static const transport_interface_t s_ipc_vtable = {
+    .send               = ipc_send,
+    .register_receive_cb = ipc_register_receive_cb,
+    .send_data          = ipc_vtable_send_data,
+    .set_data_cb        = ipc_vtable_set_data_cb,
+    .set_process_task   = ipc_vtable_set_process_task,
+    .process            = ipc_vtable_process,
+};
+
 /* ── Multi-client command channel for generic CM55 clients ───────────────────────── */
 bool ipc_interface_register_client(uint8_t cm55_client_id, ipc_client_cb_t cb)
 {
@@ -220,9 +253,8 @@ bool ipc_interface_send_command(uint8_t cm33_client_id, uint8_t cmd, uint32_t va
  * ═══════════════════════════════════════════════════════════════════════════ */
 void ipc_interface_init(ipc_interface_t *self)
 {
-    self->base.send               = ipc_send;
-    self->base.register_receive_cb = ipc_register_receive_cb;
-    self->on_receive               = NULL;
+    self->base       = s_ipc_vtable;
+    self->on_receive = NULL;
 
     s_iface = self;
 
