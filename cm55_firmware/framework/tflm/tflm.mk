@@ -85,14 +85,18 @@ INCLUDES += \
     -I$(TFLM_TREE)/third_party/cmsis_nn/Include
 
 FRAMEWORK_DIR := $(BOARD_DIR)/framework/tflm
+TFLM_ENGINE_DIR := $(BOARD_DIR)/engine/tflm
+TFLM_ADAPTER_DIR := $(BOARD_DIR)/adapters/tflm
 FRAMEWORK_C_SRCS := \
     $(FRAMEWORK_DIR)/main.c \
+    $(TFLM_ENGINE_DIR)/tflm_engine.c \
     $(APP_DIR)/sources/transport/ipc.c \
     $(SHARED_DIR)/source/COMPONENT_CM55/cm55_ipc_communication.c
-FRAMEWORK_CXX_SRCS := $(FRAMEWORK_DIR)/tflm_runner.cpp
+FRAMEWORK_CXX_SRCS := $(TFLM_ADAPTER_DIR)/adapter.cpp
 
 INCLUDES += \
-    -I$(FRAMEWORK_DIR)
+    -I$(TFLM_ENGINE_DIR) \
+    -I$(TFLM_ADAPTER_DIR)
 
 ALL_C_SRCS   := $(FRAMEWORK_C_SRCS) $(BSP_C_SRCS) $(LIB_C_SRCS)
 ALL_CXX_SRCS := $(FRAMEWORK_CXX_SRCS) $(LIB_CXX_SRCS)
