@@ -1,23 +1,18 @@
 /*
  * ipc.h — IPC transport over the PSoC Edge IPC pipe (target / C-application
- *          side), exposing the generic transport_interface_t vtable.
+ *          side).
  *
- * Included directly by application code that drives the IPC transport itself
- * (e.g. framework/tflm/main.c for bulk x/y streaming). The DeepCraft path
- * instead goes through adapters/deepcraft/wrapper.c, which casts the
- * transport_interface_t vtable to its own deepcraft_interface_t (the two
- * vtables are layout-identical; see the _Static_asserts in
- * framework/deepcraft/main.c).
+ * Included directly by application code that drives the IPC transport. An
+ * application that needs the generic transport_interface_t (transport.h)
+ * wires these functions into one (see framework/tflm/main.c).
  *
  * Provides:
  *   ipc_interface_init()         — sets up the IPC pipe and the T2H ring
+ *   ipc_interface_send()         — send a command/event to the host
  *   ipc_interface_send_data()    — stream bytes target -> host
  *   ipc_interface_set_data_cb()  — register a host -> target bulk-data sink
  *   ipc_interface_register_client() / ipc_interface_send_command()
  *                                — per-client command channel
- *
- * To swap transports, implement a new transport_interface_t (send +
- * register_receive_cb) in a separate file; callers are otherwise unchanged.
  *
  * Copyright (c) 2026 Infineon Technologies AG
  * SPDX-License-Identifier: MIT
@@ -31,31 +26,18 @@
 #include <stdbool.h>
 
 /*
- * Generic transport vtable — the plug-in point for inter-core link implementations.
- */
-typedef struct transport_interface_s transport_interface_t;
-struct transport_interface_s {
-    bool (*send)(transport_interface_t *self, uint8_t cmd, uint32_t value);
-    void (*register_receive_cb)(transport_interface_t *self,
-                                void (*cb)(uint8_t cmd, uint32_t value));
-};
-
-/*
- * IPC transport instance.
- * `base` MUST be first — allows cast to transport_interface_t *.
- */
-typedef struct {
-    transport_interface_t  base;       /* vtable — MUST be first      */
-    void (*on_receive)(uint8_t cmd, uint32_t value);  /* ISR relay    */
-} ipc_interface_t;
-
-/*
  * ipc_interface_init
  *
- * Populates the transport vtable, initialises the target -> host ring, and
- * sets up the IPC pipe. Call once at boot, before starting the RTOS scheduler.
+ * Initialises the target -> host ring and the IPC pipe. Call once at boot,
+ * before starting the RTOS scheduler.
  */
-void ipc_interface_init(ipc_interface_t *self);
+void ipc_interface_init(void);
+
+/* Send a command/event to the host. Returns false if the pipe stayed busy. */
+bool ipc_interface_send(uint8_t cmd, uint32_t value);
+
+/* Register the callback for messages addressed to CM55_IPC_PIPE_CLIENT_ID. */
+void ipc_interface_register_receive_cb(void (*cb)(uint8_t cmd, uint32_t value));
 
 /* Register the FreeRTOS task that processes deferred bulk-data notifications. */
 void ipc_interface_set_process_task(void *task_handle);
@@ -93,7 +75,5 @@ bool ipc_interface_register_client(uint8_t cm55_client_id, ipc_client_cb_t cb);
  * returns false if the pipe stayed busy.
  */
 bool ipc_interface_send_command(uint8_t cm33_client_id, uint8_t cmd, uint32_t value);
-
-/* ── Notify helpers: send VA model events to the host ───────────────────── */
 
 #endif /* IPC_H */

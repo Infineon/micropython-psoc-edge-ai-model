@@ -18,7 +18,6 @@
 #define IPC_SVC2_CM55_CLIENT_ID  (CM55_IPC_PIPE_CLIENT_ID + 1U)
 #define IPC_CMD_QUEUE_LEN        (8U)
 
-static ipc_interface_t g_ipc_interface;
 static TaskHandle_t g_ipc_task_hdl = NULL;
 static uint8_t g_echo_buffer[65536U];
 static volatile size_t g_echo_length;
@@ -98,7 +97,7 @@ int main(void)
     CY_ASSERT(result == CY_RSLT_SUCCESS);
     __enable_irq();
 
-    ipc_interface_init(&g_ipc_interface);
+    ipc_interface_init();
     ipc_interface_set_data_cb(ipc_echo_cb);
 
     /* Register both command services on the shared CM55 endpoint. Client 5 also

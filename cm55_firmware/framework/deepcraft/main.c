@@ -22,17 +22,6 @@
 
 #include "wrapper.h"
 
-/* The deepcraft path casts g_ipc_interface.base (transport_interface_t) to
- * deepcraft_interface_t *; guard that the two vtables stay layout-identical. */
-_Static_assert(sizeof(transport_interface_t) == sizeof(deepcraft_interface_t),
-    "transport_interface_t and deepcraft_interface_t must have identical size");
-_Static_assert(offsetof(transport_interface_t, send)
-        == offsetof(deepcraft_interface_t, send),
-    "send vtable slot must be at the same offset in both interfaces");
-_Static_assert(offsetof(transport_interface_t, register_receive_cb)
-        == offsetof(deepcraft_interface_t, register_receive_cb),
-    "register_receive_cb vtable slot must be at the same offset in both interfaces");
-
 #define VA_TASK_NAME         ("va-task")
 #define VA_TASK_STACK_SIZE   (10 * 1024)
 #define VA_TASK_PRIORITY     (CY_RTOS_PRIORITY_NORMAL)
@@ -45,7 +34,26 @@ _Static_assert(offsetof(transport_interface_t, register_receive_cb)
 static volatile bool g_va_enabled  = false;
 static TaskHandle_t  g_va_task_hdl = NULL;
 static TaskHandle_t  g_ipc_task_hdl = NULL;
-static ipc_interface_t g_ipc_interface;
+
+/* deepcraft_interface_t (external dependency) takes `self`; the IPC transport
+ * is a singleton and does not. */
+static bool dc_send(deepcraft_interface_t *self, uint8_t cmd, uint32_t value)
+{
+    (void)self;
+    return ipc_interface_send(cmd, value);
+}
+
+static void dc_register_receive_cb(deepcraft_interface_t *self,
+    void (*cb)(uint8_t cmd, uint32_t value))
+{
+    (void)self;
+    ipc_interface_register_receive_cb(cb);
+}
+
+static deepcraft_interface_t g_deepcraft_interface = {
+    .send                = dc_send,
+    .register_receive_cb = dc_register_receive_cb,
+};
 
 /* ─────────── consume CM33's PDM audio from the shared ring ──────────────
  * CM33 streams raw int16 PCM into the host->target ring; here we compute the
@@ -211,11 +219,8 @@ int main(void)
     __enable_irq();
 
     /* Initialise the DeepCraft model interface (transport configured inside) */
-    ipc_interface_init(&g_ipc_interface);
-    /* base is layout-compatible with deepcraft_interface_t (enforced by the
-     * _Static_assert checks at the top of this file). */
-    deepcraft_wrapper_init((deepcraft_interface_t *)&g_ipc_interface.base,
-        on_va_start, on_va_stop);
+    ipc_interface_init();
+    deepcraft_wrapper_init(&g_deepcraft_interface, on_va_start, on_va_stop);
 
     result = xTaskCreate(ipc_task, IPC_TASK_NAME, IPC_TASK_STACK_SIZE,
         NULL, IPC_TASK_PRIORITY, &g_ipc_task_hdl);
