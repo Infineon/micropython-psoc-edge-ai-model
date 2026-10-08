@@ -45,6 +45,11 @@ bool tflm_runner_is_loaded(void);
 bool tflm_runner_invoke(const uint8_t *data, size_t len,
     uint8_t *out, size_t out_capacity, size_t *out_len);
 
+/* Report input tensor 0's affine quantization params, so a caller holding
+ * float features can quantize them to the tensor's int8 domain before
+ * tflm_runner_invoke(). Returns false if no model is loaded. */
+bool tflm_runner_input_quant(float *scale, int32_t *zero_point);
+
 #ifdef __cplusplus
 }
 #endif

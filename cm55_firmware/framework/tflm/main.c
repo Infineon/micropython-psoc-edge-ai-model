@@ -11,6 +11,7 @@
 
 #include "tflm_engine.h"
 #include "tflm_runner.h"
+#include "kws_frontend.h"
 #include "ipc.h"
 
 /*
@@ -36,12 +37,7 @@ static ipc_interface_t s_ipc;
  * to load, as a byte offset from this base. */
 #define MODEL_XIP_BASE (0x62000000UL)
 
-/* Output scratch buffer for tflm_runner_invoke(); sized generously for
- * typical small on-device models (classifiers, KWS, sensor models). */
-#define TFLM_OUTPUT_BUF_SIZE (4096U)
-
 static tflm_engine_t g_engine;
-static uint8_t g_output_buf[TFLM_OUTPUT_BUF_SIZE];
 
 static bool on_model_load(uint32_t flash_offset)
 {
@@ -55,13 +51,19 @@ static bool on_model_unload(void)
     return true;
 }
 
+/* `data` is raw int16 PCM from the host; the KWS front-end turns it into a
+ * detection byte (0x35 on "hey edge") plus the two int8 class logits, so the
+ * host can see model confidence alongside the decision. */
 static bool on_run_inference(const uint8_t *data, size_t len)
 {
-    size_t out_len = 0U;
-    if (!tflm_runner_invoke(data, len, g_output_buf, sizeof(g_output_buf), &out_len)) {
+    uint8_t code = 0U;
+    int8_t scores[2] = {0, 0};
+    if (!kws_frontend_process(data, len, &code, scores)) {
         return false;
     }
-    tflm_engine_send_result(&g_engine, g_output_buf, out_len);
+    /* Reply: [decision, hey_edge_logit, noise_logit]. */
+    uint8_t reply[3] = { code, (uint8_t)scores[0], (uint8_t)scores[1] };
+    tflm_engine_send_result(&g_engine, reply, sizeof(reply));
     return true;
 }
 

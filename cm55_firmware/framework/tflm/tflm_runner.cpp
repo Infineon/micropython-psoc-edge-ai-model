@@ -219,3 +219,22 @@ extern "C" bool tflm_runner_invoke(const uint8_t *data, size_t len,
     }
     return true;
 }
+
+extern "C" bool tflm_runner_input_quant(float *scale, int32_t *zero_point)
+{
+    if (interpreter == nullptr) {
+        return false;
+    }
+
+    const TfLiteTensor *input = interpreter->input(0);
+    if (input == nullptr) {
+        return false;
+    }
+    if (scale != nullptr) {
+        *scale = input->params.scale;
+    }
+    if (zero_point != nullptr) {
+        *zero_point = input->params.zero_point;
+    }
+    return true;
+}
