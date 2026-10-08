@@ -4,11 +4,13 @@
  * The model's input tensor is 7920 int8 MFE features, not raw audio, so this
  * runs Edge Impulse's own MFE DSP (byte-exact with how the model was trained)
  * on the incoming PCM, quantizes to the input tensor's int8 domain, invokes
- * the generic tflm_runner, and thresholds the 2-class output.
+ * the generic TFLM adapter, and thresholds the 2-class output.
  *
- * Only the Edge Impulse DSP subset is compiled in (see tflm.mk) -- the EI
- * TensorFlow/run_classifier engine is deliberately NOT used; inference stays
- * on the project's existing tflm-core.a via tflm_runner.
+ * The generic engine stages raw PCM and calls tflm_adapter_invoke(); for the
+ * KWS build that symbol is linker-wrapped (-Wl,--wrap) to __wrap_tflm_adapter_invoke
+ * below, which runs this MFE pipeline and feeds the quantized features to the
+ * real adapter (__real_tflm_adapter_invoke). Only the Edge Impulse DSP subset is
+ * compiled in (see tflm.mk) -- the EI TensorFlow/run_classifier engine is not used.
  *
  * Copyright (c) 2026 Infineon Technologies AG
  * SPDX-License-Identifier: MIT
@@ -23,8 +25,13 @@
 #include "model_metadata.h"
 #include "edge-impulse-sdk/classifier/ei_run_dsp.h"
 
-#include "tflm_runner.h"
+#include "adapter.h"
 #include "kws_frontend.h"
+
+/* The genuine adapter entry (the engine's tflm_adapter_invoke call is linker-
+ * wrapped to __wrap_... below); we feed it the quantized MFE features. */
+extern "C" bool __real_tflm_adapter_invoke(const uint8_t *data, size_t len,
+    uint8_t *out, size_t out_capacity, size_t *out_len);
 
 /* Model I/O geometry, tracked from the exported metadata. */
 #define KWS_FEATURE_COUNT   (EI_CLASSIFIER_NN_INPUT_FRAME_SIZE)
@@ -89,11 +96,13 @@ extern "C" bool kws_frontend_process(const uint8_t *pcm_bytes, size_t len,
         return false;
     }
 
-    float scale = 0.0f;
-    int32_t zero_point = 0;
-    if (!tflm_runner_input_quant(&scale, &zero_point) || scale == 0.0f) {
+    tflm_adapter_tensor_info_t in_info;
+    tflm_adapter_tensor_info_t out_info;
+    if (!tflm_adapter_get_info(&in_info, &out_info) || in_info.scale == 0.0f) {
         return false;
     }
+    const float scale = in_info.scale;
+    const int32_t zero_point = in_info.zero_point;
 
     for (size_t i = 0U; i < KWS_FEATURE_COUNT; i++) {
         int32_t q = static_cast<int32_t>(lroundf(s_features[i] / scale)) + zero_point;
@@ -104,7 +113,7 @@ extern "C" bool kws_frontend_process(const uint8_t *pcm_bytes, size_t len,
 
     uint8_t raw_out[8];
     size_t out_len = 0U;
-    if (!tflm_runner_invoke(reinterpret_cast<const uint8_t *>(s_features_q),
+    if (!__real_tflm_adapter_invoke(reinterpret_cast<const uint8_t *>(s_features_q),
             KWS_FEATURE_COUNT, raw_out, sizeof(raw_out), &out_len)) {
         return false;
     }
@@ -118,6 +127,29 @@ extern "C" bool kws_frontend_process(const uint8_t *pcm_bytes, size_t len,
     if (out_scores != nullptr) {
         out_scores[0] = q_hey_edge;
         out_scores[1] = (out_len > 1U) ? static_cast<int8_t>(raw_out[1]) : 0;
+    }
+    return true;
+}
+
+/* Linker-wrap hook (KWS build): the generic engine stages raw int16 PCM and
+ * calls tflm_adapter_invoke; we intercept it, run the MFE + inference pipeline,
+ * and return 3 decoded bytes: [decision, hey_edge logit, noise logit]. */
+extern "C" bool __wrap_tflm_adapter_invoke(const uint8_t *data, size_t len,
+    uint8_t *out, size_t out_capacity, size_t *out_len)
+{
+    if (out == nullptr || out_capacity < 3U) {
+        return false;
+    }
+    uint8_t code = KWS_CODE_NOT_DETECTED;
+    int8_t scores[2] = {0, 0};
+    if (!kws_frontend_process(data, len, &code, scores)) {
+        return false;
+    }
+    out[0] = code;
+    out[1] = static_cast<uint8_t>(scores[0]);
+    out[2] = static_cast<uint8_t>(scores[1]);
+    if (out_len != nullptr) {
+        *out_len = 3U;
     }
     return true;
 }

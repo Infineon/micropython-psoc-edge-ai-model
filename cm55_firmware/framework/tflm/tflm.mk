@@ -98,6 +98,38 @@ INCLUDES += \
     -I$(TFLM_ENGINE_DIR) \
     -I$(TFLM_ADAPTER_DIR)
 
+# ── Optional "hey edge" KWS front-end (KWS=1) ────────────────────────────────
+# Layers the Edge Impulse MFE DSP front-end on top of the generic engine. The
+# engine stages raw int16 PCM and calls tflm_adapter_invoke(); -Wl,--wrap
+# redirects that to kws_frontend.cpp's __wrap_tflm_adapter_invoke, which runs
+# MFE + quantize, feeds the features to __real_tflm_adapter_invoke, and returns
+# the decoded result bytes. Build: `make FRAMEWORK=tflm KWS=1`.
+ifeq ($(KWS),1)
+EI_DIR        := $(REPO_ROOT)/deps/edge-impulse-sdk
+KWS_DIR       := $(FRAMEWORK_DIR)/edge-impulse-kws
+EI_COMPAT_DIR := $(BUILD_DIR)/ei-compat
+
+# Vendored EI headers #include "model-parameters/model_metadata.h" with that
+# literal prefix; the exported metadata lives flat in edge-impulse-kws, so
+# synthesize a one-line forwarding header under the build tree (wiped by clean).
+$(shell mkdir -p $(EI_COMPAT_DIR)/model-parameters && printf '#include "%s"\n' '$(abspath $(KWS_DIR)/model_metadata.h)' > $(EI_COMPAT_DIR)/model-parameters/model_metadata.h)
+
+FRAMEWORK_CXX_SRCS += \
+    $(KWS_DIR)/kws_frontend.cpp \
+    $(EI_DIR)/dsp/memory.cpp \
+    $(EI_DIR)/dsp/kissfft/kiss_fft.cpp \
+    $(EI_DIR)/dsp/kissfft/kiss_fftr.cpp \
+    $(EI_DIR)/porting/clib/ei_classifier_porting.cpp
+
+INCLUDES += \
+    -I$(KWS_DIR) \
+    -I$(EI_COMPAT_DIR) \
+    -I$(REPO_ROOT)/deps
+
+DEFINES += -DEIDSP_USE_CMSIS_DSP=0 -DEI_PORTING_CLIB=1
+LDFLAGS += -Wl,--wrap=tflm_adapter_invoke
+endif
+
 ALL_C_SRCS   := $(FRAMEWORK_C_SRCS) $(BSP_C_SRCS) $(LIB_C_SRCS)
 ALL_CXX_SRCS := $(FRAMEWORK_CXX_SRCS) $(LIB_CXX_SRCS)
 ALL_S_SRCS   := $(LIB_S_SRCS)
