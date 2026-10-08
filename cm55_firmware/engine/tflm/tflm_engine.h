@@ -24,17 +24,17 @@ extern "C" {
  * ═══════════════════════════════════════════════════════════════════════ */
 
 /* ── Commands: host (CM33) -> target (CM55) ──────────────────────────── */
-#define TFLM_CMD_MODEL_LOAD     (0x90U) /* value = byte offset of the .tflite model in the external-flash model partition */
-#define TFLM_CMD_MODEL_UNLOAD   (0x91U)
-#define TFLM_CMD_MODEL_RUN      (0x92U) /* start accepting TFLM_CMD_RUN_INFERENCE */
+#define TFLM_CMD_MODEL_LOAD     (0x90U) /* value = byte offset of the .tflite model in the external-flash model partition; only when unloaded */
+#define TFLM_CMD_MODEL_UNLOAD   (0x91U) /* release the model; valid when loaded or running */
+#define TFLM_CMD_MODEL_RUN      (0x92U) /* start accepting TFLM_CMD_RUN_INFERENCE; only when loaded */
 #define TFLM_CMD_MODEL_PAUSE    (0x93U) /* stop accepting TFLM_CMD_RUN_INFERENCE; model stays loaded */
 #define TFLM_CMD_RUN_INFERENCE  (0x94U) /* invoke on input bytes already staged via the bulk data ring */
 #define TFLM_CMD_MODEL_INFO     (0x95U) /* reply (bulk ring): input then output tflm_adapter_tensor_info_t, 64 bytes; needs a loaded model */
 
 /* ── Events: target (CM55) -> host (CM33) ────────────────────────────── */
 #define TFLM_EVT_READY           (0xB0U) /* engine initialised, no model loaded yet */
-#define TFLM_EVT_MODEL_LOADED    (0xB1U)
-#define TFLM_EVT_MODEL_UNLOADED  (0xB2U)
+#define TFLM_EVT_MODEL_LOADED    (0xB1U) /* ack of TFLM_CMD_MODEL_LOAD */
+#define TFLM_EVT_MODEL_UNLOADED  (0xB2U) /* ack of TFLM_CMD_MODEL_UNLOAD */
 #define TFLM_EVT_MODEL_RUNNING   (0xB3U) /* ack of TFLM_CMD_MODEL_RUN */
 #define TFLM_EVT_MODEL_PAUSED    (0xB4U) /* ack of TFLM_CMD_MODEL_PAUSE */
 /* No separate "result ready" event: inference output is streamed over the
@@ -44,10 +44,10 @@ extern "C" {
 
 /* ── Error codes: reported alongside TFLM_EVT_ERROR ───────────────────── */
 typedef enum {
-    TFLM_ERR_NONE               = 0,
-    TFLM_ERR_BAD_STATE          = 1, /* command not valid in the current state */
-    TFLM_ERR_MODEL_LOAD_FAILED  = 2,
-    TFLM_ERR_INVOKE_FAILED      = 3,
+    TFLM_ERR_NONE               = 0, /* never sent; no error */
+    TFLM_ERR_BAD_STATE          = 1, /* command not valid in the current state, or unknown command */
+    TFLM_ERR_MODEL_LOAD_FAILED  = 2, /* adapter rejected the model at the given offset */
+    TFLM_ERR_INVOKE_FAILED      = 3, /* inference or tensor-info query failed, or the staged input overflowed the buffer */
 } tflm_error_t;
 
 /* ═══════════════════════════════════════════════════════════════════════
