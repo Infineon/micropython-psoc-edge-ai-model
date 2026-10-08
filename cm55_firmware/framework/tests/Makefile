@@ -23,20 +23,15 @@ include $(BOARD_DIR)/board.mk
 
 TEST_FRAMEWORK_DIR := $(BOARD_DIR)/framework/tests
 
-# Keep the test framework source list deliberately limited to its entrypoint.
-FRAMEWORK_C_SRCS := $(TEST_FRAMEWORK_DIR)/main.c
+# Entrypoint plus the IPC transport under test (board.mk no longer carries them).
+FRAMEWORK_C_SRCS := \
+	$(TEST_FRAMEWORK_DIR)/main.c \
+	$(APP_DIR)/sources/transport/ipc.c \
+	$(SHARED_DIR)/source/COMPONENT_CM55/cm55_ipc_communication.c
 
-APP_C_SRCS := $(filter-out \
-	$(APP_DIR)/adapters/deepcraft/wrapper.c, \
-	$(APP_C_SRCS))
-LIB_C_SRCS := $(filter-out $(LIB_VA)/%, $(LIB_C_SRCS))
-DEFINES := $(filter-out -DPROJECT_PREFIX=%, $(DEFINES))
+INCLUDES += -I$(TEST_FRAMEWORK_DIR)
 
-INCLUDES += \
-	-I$(TEST_FRAMEWORK_DIR) \
-	-I$(REPO_ROOT)/deps/deepcraft/micropython-deepcraft-model-interface/deepcraft
-
-ALL_C_SRCS   := $(APP_C_SRCS) $(FRAMEWORK_C_SRCS) $(BSP_C_SRCS) $(LIB_C_SRCS)
+ALL_C_SRCS   := $(FRAMEWORK_C_SRCS) $(BSP_C_SRCS) $(LIB_C_SRCS)
 ALL_CXX_SRCS := $(LIB_CXX_SRCS)
 ALL_S_SRCS   := $(LIB_S_SRCS)
 

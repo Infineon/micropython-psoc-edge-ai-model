@@ -7,7 +7,7 @@
 #include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
 #include "tensorflow/lite/schema/schema_generated.h"
 
-#include "tflm_runner.h"
+#include "adapter.h"
 
 #define TFLM_TENSOR_ARENA_SIZE (128U * 1024U)
 #define TFLM_SCHEMA_VERSION    (3U)
@@ -16,7 +16,7 @@ alignas(16) static uint8_t tensor_arena[TFLM_TENSOR_ARENA_SIZE]
     __attribute__((section(".cy_socmem_data")));
 
 // Upstream tflite-micro dropped AllOpsResolver (it forces callers to opt into
-// exactly the ops a model needs, for binary size). This runner has no
+// exactly the ops a model needs, for binary size). This adapter has no
 // compile-time knowledge of which model gets flashed, so register every
 // available builtin op here to keep the old AllOpsResolver-style behavior.
 using TflmOpResolver = tflite::MicroMutableOpResolver<128>;
@@ -157,10 +157,10 @@ alignas(alignof(tflite::MicroInterpreter))
 static uint8_t interpreter_storage[sizeof(tflite::MicroInterpreter)];
 static tflite::MicroInterpreter *interpreter = nullptr;
 
-extern "C" bool tflm_runner_load(const uint8_t *model_data)
+extern "C" bool tflm_adapter_load(const uint8_t *model_data)
 {
     if (interpreter != nullptr) {
-        tflm_runner_unload();
+        tflm_adapter_unload();
     }
 
     const tflite::Model *model = tflite::GetModel(model_data);
@@ -173,13 +173,13 @@ extern "C" bool tflm_runner_load(const uint8_t *model_data)
         model, resolver, tensor_arena, TFLM_TENSOR_ARENA_SIZE);
 
     if (interpreter->AllocateTensors() != kTfLiteOk) {
-        tflm_runner_unload();
+        tflm_adapter_unload();
         return false;
     }
     return true;
 }
 
-extern "C" void tflm_runner_unload(void)
+extern "C" void tflm_adapter_unload(void)
 {
     if (interpreter != nullptr) {
         interpreter->~MicroInterpreter();
@@ -187,12 +187,36 @@ extern "C" void tflm_runner_unload(void)
     }
 }
 
-extern "C" bool tflm_runner_is_loaded(void)
+static void fill_info(const TfLiteTensor *t, tflm_adapter_tensor_info_t *info)
 {
-    return interpreter != nullptr;
+    std::memset(info, 0, sizeof(*info));
+    info->type = static_cast<uint8_t>(t->type);
+    int rank = (t->dims != nullptr) ? t->dims->size : 0;
+    info->rank = static_cast<uint8_t>(rank < 4 ? rank : 4);
+    for (int i = 0; i < info->rank; i++) {
+        info->dims[i] = t->dims->data[i];
+    }
+    info->bytes = static_cast<uint32_t>(t->bytes);
+    info->scale = t->params.scale;
+    info->zero_point = t->params.zero_point;
 }
 
-extern "C" bool tflm_runner_invoke(const uint8_t *data, size_t len,
+extern "C" bool tflm_adapter_get_info(tflm_adapter_tensor_info_t *in, tflm_adapter_tensor_info_t *out)
+{
+    if (interpreter == nullptr) {
+        return false;
+    }
+    const TfLiteTensor *input = interpreter->input(0);
+    const TfLiteTensor *output = interpreter->output(0);
+    if (input == nullptr || output == nullptr) {
+        return false;
+    }
+    fill_info(input, in);
+    fill_info(output, out);
+    return true;
+}
+
+extern "C" bool tflm_adapter_invoke(const uint8_t *data, size_t len,
     uint8_t *out, size_t out_capacity, size_t *out_len)
 {
     if (interpreter == nullptr) {
@@ -216,25 +240,6 @@ extern "C" bool tflm_runner_invoke(const uint8_t *data, size_t len,
     std::memcpy(out, output->data.raw, output->bytes);
     if (out_len != nullptr) {
         *out_len = output->bytes;
-    }
-    return true;
-}
-
-extern "C" bool tflm_runner_input_quant(float *scale, int32_t *zero_point)
-{
-    if (interpreter == nullptr) {
-        return false;
-    }
-
-    const TfLiteTensor *input = interpreter->input(0);
-    if (input == nullptr) {
-        return false;
-    }
-    if (scale != nullptr) {
-        *scale = input->params.scale;
-    }
-    if (zero_point != nullptr) {
-        *zero_point = input->params.zero_point;
     }
     return true;
 }

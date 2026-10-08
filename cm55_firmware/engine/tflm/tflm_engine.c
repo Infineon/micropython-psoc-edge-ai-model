@@ -1,12 +1,13 @@
 /*
- * tflm_engine.c — Transport-agnostic TFLM model state machine.
+ * tflm_engine.c — TFLM model state machine over the transport_interface_t.
  *
  * Implements the wire protocol and state machine declared in
- * tflm_engine.h purely against the transport_interface_t vtable (see
- * includes/ipc.h) -- no transport-specific header is referenced here.
+ * tflm_engine.h against the transport_interface_t vtable (see
+ * includes/transport.h) -- no transport-specific header is referenced here, and
+ * models are loaded/run through adapters/tflm/adapter.h.
  * Follows the same producer/consumer split as framework/tests/main.c: the
  * transport's receive callback only queues events (commands) and wakes the
- * owning task; all engine/callback logic runs from that task's context via
+ * owning task; all engine logic runs from that task's context via
  * tflm_engine_process().
  *
  * Copyright (c) 2026 Infineon Technologies AG
@@ -19,6 +20,7 @@
 #include "task.h"
 
 #include "tflm_engine.h"
+#include "adapter.h"
 
 #define TFLM_CMD_QUEUE_LEN (8U)
 
@@ -27,13 +29,29 @@
  * transfer cannot exceed it anyway. */
 #define TFLM_MAX_INPUT_BYTES (65536U)
 
+/* Output scratch for tflm_adapter_invoke(); sized for small on-device models
+ * (classifiers, KWS, sensor models). */
+#define TFLM_MAX_OUTPUT_BYTES (4096U)
+
+/* The MODEL_INFO reply is two of these back to back; the host decodes them. */
+_Static_assert(sizeof(tflm_adapter_tensor_info_t) == 32, "MODEL_INFO wire layout");
+
 typedef struct {
     uint8_t  cmd;
     uint32_t value;
 } tflm_cmd_evt_t;
 
-/* Only one task can own an engine's IPC events at a time -- stored here
- * since the transport's callbacks carry no user-data pointer. */
+typedef enum {
+    TFLM_STATE_UNLOADED = 0, /* no model loaded */
+    TFLM_STATE_LOADED   = 1, /* tensors allocated, paused (not accepting inference) */
+    TFLM_STATE_RUNNING  = 2, /* accepting TFLM_CMD_RUN_INFERENCE */
+} tflm_state_t;
+
+/* Singleton: the transport callbacks carry no user pointer and the adapter
+ * holds a single interpreter, so all engine state is file-scope. */
+static const transport_interface_t *s_transport;
+static uintptr_t s_model_base;
+static tflm_state_t s_state;
 static TaskHandle_t s_task;
 
 /* SPSC command queue: producer = transport's receive callback (usually ISR
@@ -47,6 +65,7 @@ static volatile uint32_t s_cmd_tail;
 static uint8_t s_input_buf[TFLM_MAX_INPUT_BYTES];
 static size_t s_input_len;
 static bool s_input_overflow;
+static uint8_t s_output_buf[TFLM_MAX_OUTPUT_BYTES];
 
 static void notify_task_from_isr(void)
 {
@@ -82,144 +101,141 @@ static void on_transport_data(const uint8_t *data, size_t len)
     s_input_len += len;
 }
 
-static void send_error(tflm_engine_t *engine, tflm_error_t err)
+static void send_error(tflm_error_t err)
 {
-    engine->transport->send(engine->transport, TFLM_EVT_ERROR, (uint32_t)err);
+    s_transport->send(TFLM_EVT_ERROR, (uint32_t)err);
 }
 
-static void handle_run_inference(tflm_engine_t *engine)
+static void handle_run_inference(void)
 {
     size_t len = s_input_len;
     bool overflow = s_input_overflow;
     s_input_len = 0U;
     s_input_overflow = false;
 
-    if (engine->state != TFLM_STATE_RUNNING) {
-        send_error(engine, TFLM_ERR_BAD_STATE);
+    if (s_state != TFLM_STATE_RUNNING) {
+        send_error(TFLM_ERR_BAD_STATE);
         return;
     }
     if (overflow) {
-        send_error(engine, TFLM_ERR_INVOKE_FAILED);
+        send_error(TFLM_ERR_INVOKE_FAILED);
         return;
     }
-    if (engine->callbacks.on_run_inference == NULL
-            || !engine->callbacks.on_run_inference(s_input_buf, len)) {
-        send_error(engine, TFLM_ERR_INVOKE_FAILED);
+    size_t out_len = 0U;
+    if (!tflm_adapter_invoke(s_input_buf, len, s_output_buf, sizeof(s_output_buf), &out_len)) {
+        send_error(TFLM_ERR_INVOKE_FAILED);
+        return;
     }
+    s_transport->send_data(s_output_buf, out_len);
 }
 
-void tflm_engine_init(tflm_engine_t *engine, transport_interface_t *transport,
-    const tflm_callbacks_t *callbacks)
+void tflm_engine_init(const transport_interface_t *transport, uintptr_t model_base)
 {
-    engine->state     = TFLM_STATE_UNLOADED;
-    engine->callbacks = *callbacks;
-    engine->transport = transport;
+    s_state      = TFLM_STATE_UNLOADED;
+    s_transport  = transport;
+    s_model_base = model_base;
 
     s_cmd_head = 0U;
     s_cmd_tail = 0U;
     s_input_len = 0U;
     s_input_overflow = false;
 
+    transport->init();
     transport->set_data_cb(on_transport_data);
-    transport->register_receive_cb(transport, on_transport_command);
+    transport->register_receive_cb(on_transport_command);
 }
 
-void tflm_engine_set_process_task(tflm_engine_t *engine, void *task_handle)
+void tflm_engine_set_process_task(void *task_handle)
 {
     s_task = (TaskHandle_t)task_handle;
-    engine->transport->set_process_task(task_handle);
+    s_transport->set_process_task(task_handle);
 }
 
-void tflm_engine_on_receive(tflm_engine_t *engine, uint8_t cmd, uint32_t value)
+/* Not reentrant: runs only from the task that owns the engine. */
+static void handle_command(uint8_t cmd, uint32_t value)
 {
     switch (cmd) {
         case TFLM_CMD_MODEL_LOAD:
-            if (engine->state != TFLM_STATE_UNLOADED) {
-                send_error(engine, TFLM_ERR_BAD_STATE);
+            if (s_state != TFLM_STATE_UNLOADED) {
+                send_error(TFLM_ERR_BAD_STATE);
                 break;
             }
-            if (engine->callbacks.on_model_load == NULL
-                    || !engine->callbacks.on_model_load(value)) {
-                send_error(engine, TFLM_ERR_MODEL_LOAD_FAILED);
+            if (!tflm_adapter_load((const uint8_t *)(s_model_base + value))) {
+                send_error(TFLM_ERR_MODEL_LOAD_FAILED);
                 break;
             }
-            engine->state = TFLM_STATE_LOADED;
-            engine->transport->send(engine->transport, TFLM_EVT_MODEL_LOADED, 0U);
+            s_state = TFLM_STATE_LOADED;
+            s_transport->send(TFLM_EVT_MODEL_LOADED, 0U);
             break;
 
         case TFLM_CMD_MODEL_UNLOAD:
-            if (engine->state == TFLM_STATE_UNLOADED) {
-                send_error(engine, TFLM_ERR_BAD_STATE);
+            if (s_state == TFLM_STATE_UNLOADED) {
+                send_error(TFLM_ERR_BAD_STATE);
                 break;
             }
-            if (engine->callbacks.on_model_unload != NULL) {
-                engine->callbacks.on_model_unload();
-            }
-            engine->state = TFLM_STATE_UNLOADED;
+            tflm_adapter_unload();
+            s_state = TFLM_STATE_UNLOADED;
             s_input_len = 0U;
             s_input_overflow = false;
-            engine->transport->send(engine->transport, TFLM_EVT_MODEL_UNLOADED, 0U);
+            s_transport->send(TFLM_EVT_MODEL_UNLOADED, 0U);
             break;
 
         case TFLM_CMD_MODEL_RUN:
-            if (engine->state != TFLM_STATE_LOADED) {
-                send_error(engine, TFLM_ERR_BAD_STATE);
+            if (s_state != TFLM_STATE_LOADED) {
+                send_error(TFLM_ERR_BAD_STATE);
                 break;
             }
-            if (engine->callbacks.on_model_run != NULL && !engine->callbacks.on_model_run()) {
-                send_error(engine, TFLM_ERR_BAD_STATE);
-                break;
-            }
-            engine->state = TFLM_STATE_RUNNING;
-            engine->transport->send(engine->transport, TFLM_EVT_MODEL_RUNNING, 0U);
+            s_state = TFLM_STATE_RUNNING;
+            s_transport->send(TFLM_EVT_MODEL_RUNNING, 0U);
             break;
 
         case TFLM_CMD_MODEL_PAUSE:
-            if (engine->state != TFLM_STATE_RUNNING) {
-                send_error(engine, TFLM_ERR_BAD_STATE);
+            if (s_state != TFLM_STATE_RUNNING) {
+                send_error(TFLM_ERR_BAD_STATE);
                 break;
             }
-            if (engine->callbacks.on_model_pause != NULL) {
-                engine->callbacks.on_model_pause();
-            }
-            engine->state = TFLM_STATE_LOADED;
-            engine->transport->send(engine->transport, TFLM_EVT_MODEL_PAUSED, 0U);
+            s_state = TFLM_STATE_LOADED;
+            s_transport->send(TFLM_EVT_MODEL_PAUSED, 0U);
             break;
 
         case TFLM_CMD_RUN_INFERENCE:
-            handle_run_inference(engine);
+            handle_run_inference();
             break;
 
+        case TFLM_CMD_MODEL_INFO: {
+            tflm_adapter_tensor_info_t info[2];
+            if (s_state == TFLM_STATE_UNLOADED) {
+                send_error(TFLM_ERR_BAD_STATE);
+                break;
+            }
+            if (!tflm_adapter_get_info(&info[0], &info[1])) {
+                send_error(TFLM_ERR_INVOKE_FAILED);
+                break;
+            }
+            s_transport->send_data((const uint8_t *)info, sizeof(info));
+            break;
+        }
+
         default:
-            send_error(engine, TFLM_ERR_BAD_STATE);
+            send_error(TFLM_ERR_BAD_STATE);
             break;
     }
 }
 
-void tflm_engine_process(tflm_engine_t *engine)
+void tflm_engine_process(void)
 {
-    engine->transport->process(); /* drains bulk data into on_transport_data() */
+    s_transport->process(); /* drains bulk data into on_transport_data() */
 
     while (s_cmd_tail != s_cmd_head) {
         uint32_t tail = s_cmd_tail;
         uint8_t cmd = s_cmd_queue[tail].cmd;
         uint32_t value = s_cmd_queue[tail].value;
         s_cmd_tail = (tail + 1U) % TFLM_CMD_QUEUE_LEN;
-        tflm_engine_on_receive(engine, cmd, value);
+        handle_command(cmd, value);
     }
 }
 
-tflm_state_t tflm_engine_get_state(const tflm_engine_t *engine)
+void tflm_engine_notify_ready(void)
 {
-    return engine->state;
-}
-
-void tflm_engine_notify_ready(tflm_engine_t *engine)
-{
-    engine->transport->send(engine->transport, TFLM_EVT_READY, 0U);
-}
-
-size_t tflm_engine_send_result(tflm_engine_t *engine, const uint8_t *data, size_t len)
-{
-    return engine->transport->send_data(data, len);
+    s_transport->send(TFLM_EVT_READY, 0U);
 }

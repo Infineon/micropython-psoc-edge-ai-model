@@ -1,16 +1,10 @@
 /*
- * ipc.c — IPC transport implementation of transport_interface_t
- *          (target / C-application side, PSoC Edge IPC pipe).
+ * ipc.c — IPC transport over the PSoC Edge IPC pipe (target / C-application
+ *          side): command/event messages, a bulk byte stream in both
+ *          directions, and the multi-client command channel.
  *
- * Implements every transport_interface_t vtable slot (send, register_receive_cb,
- * send_data, set_data_cb, set_process_task, process) plus the multi-client
- * command channel, so that no framework's main.c ever needs to write
- * IPC-specific glue of its own -- they just call
- * ipc_interface_init() and get a fully-populated transport back.
- *
- * To use a different transport, create a new transport file that fills in a
- * transport_interface_t with its own six functions and exposes the same
- * init + notify_* signatures. Application files are unchanged.
+ * Applications that need the generic transport_interface_t (transport.h)
+ * wire the ipc_interface_* functions into one themselves.
  *
  * Copyright (c) 2026 Infineon Technologies AG
  * SPDX-License-Identifier: MIT
@@ -52,16 +46,17 @@
 /* Must reside in IPC-visible SRAM so both processors can access it.         */
 CY_SECTION_SHAREDMEM static ipc_msg_t s_tx_msg;
 
-/* Singleton — static ISR trampoline needs to reach the instance             */
-static ipc_interface_t *s_iface = NULL;
+/* Set by ipc_interface_init(); the ISR trampoline and send_data are inert before that. */
+static bool s_initialized = false;
+static void (*s_on_receive)(uint8_t cmd, uint32_t value) = NULL;
 static volatile size_t s_pending_rx_length;
 static TaskHandle_t s_process_task = NULL;
 
 /* Bulk-data receive sink (host -> target ring). NULL = drain and discard.   */
 static void (*s_on_data)(const uint8_t *data, size_t len) = NULL;
 
-/* Scratch buffer for draining the inbound (host -> target) ring inside the
- * pipe ISR; sized to the configurable drain chunk (IPC_H2T_CHUNK).          */
+/* Scratch buffer for draining the inbound (host -> target) ring in
+ * ipc_interface_process(); sized to the configurable drain chunk (IPC_H2T_CHUNK). */
 static uint8_t s_rx_scratch[IPC_H2T_CHUNK];
 
 #define IPC_MAX_CLIENTS  (CY_IPC_CYPIPE_CLIENT_CNT)
@@ -105,11 +100,10 @@ static void ipc_drain_rx_ring(size_t total)
     }
 }
 
-/* Application-level start / stop callbacks, set during init                 */
 /* IPC pipe ISR trampoline — called by the PDL pipe driver */
 static void ipc_rx_callback(uint32_t *msg_data)
 {
-    if (msg_data == NULL || s_iface == NULL) {
+    if (msg_data == NULL || !s_initialized) {
         return;
     }
     const ipc_msg_t *msg = (const ipc_msg_t *)msg_data;    
@@ -138,15 +132,14 @@ static void ipc_rx_callback(uint32_t *msg_data)
     }
 
     // If no registered client handled the message, call the generic receive callback.
-    if (s_iface->on_receive != NULL) {
-        s_iface->on_receive(msg->cmd, msg->value);
+    if (s_on_receive != NULL) {
+        s_on_receive(msg->cmd, msg->value);
     }
 }
 
-/* ── vtable: send ────────────────────────────────────────────────────────── */
-static bool ipc_send(transport_interface_t *self, uint8_t cmd, uint32_t value)
+/* ── send ────────────────────────────────────────────────────────── */
+bool ipc_interface_send(uint8_t cmd, uint32_t value)
 {
-    (void)self;
     cy_en_ipc_pipe_status_t status;
     uint32_t retries = 0;
 
@@ -170,46 +163,14 @@ static bool ipc_send(transport_interface_t *self, uint8_t cmd, uint32_t value)
     return false;
 }
 
-/* ── vtable: register_receive_cb for IPC transport ─────────────────────────────── */
-static void ipc_register_receive_cb(transport_interface_t *self,
-    void (*cb)(uint8_t cmd, uint32_t value))
+/* ── receive callback for CM55_IPC_PIPE_CLIENT_ID ───────────────────────────────────────── */
+void ipc_interface_register_receive_cb(void (*cb)(uint8_t cmd, uint32_t value))
 {
-    ipc_interface_t *iface = (ipc_interface_t *)self;
-    iface->on_receive = cb;
+    s_on_receive = cb;
     Cy_IPC_Pipe_RegisterCallback(CM55_IPC_PIPE_EP_ADDR,
         &ipc_rx_callback,
         (uint32_t)CM55_IPC_PIPE_CLIENT_ID);
 }
-
-/* ── vtable: bulk data slots -- thin forwards to the free functions below ── */
-static size_t ipc_vtable_send_data(const uint8_t *data, size_t len)
-{
-    return ipc_interface_send_data(data, len);
-}
-
-static void ipc_vtable_set_data_cb(void (*cb)(const uint8_t *data, size_t len))
-{
-    ipc_interface_set_data_cb(cb);
-}
-
-static void ipc_vtable_set_process_task(void *task_handle)
-{
-    ipc_interface_set_process_task(task_handle);
-}
-
-static void ipc_vtable_process(void)
-{
-    ipc_interface_process();
-}
-
-static const transport_interface_t s_ipc_vtable = {
-    .send               = ipc_send,
-    .register_receive_cb = ipc_register_receive_cb,
-    .send_data          = ipc_vtable_send_data,
-    .set_data_cb        = ipc_vtable_set_data_cb,
-    .set_process_task   = ipc_vtable_set_process_task,
-    .process            = ipc_vtable_process,
-};
 
 /* ── Multi-client command channel for generic CM55 clients ───────────────────────── */
 bool ipc_interface_register_client(uint8_t cm55_client_id, ipc_client_cb_t cb)
@@ -251,19 +212,16 @@ bool ipc_interface_send_command(uint8_t cm33_client_id, uint8_t cmd, uint32_t va
 /* ═══════════════════════════════════════════════════════════════════════════
  * Public init
  * ═══════════════════════════════════════════════════════════════════════════ */
-void ipc_interface_init(ipc_interface_t *self)
+void ipc_interface_init(void)
 {
-    self->base       = s_ipc_vtable;
-    self->on_receive = NULL;
-
-    s_iface = self;
+    s_on_receive = NULL;
+    s_initialized = true;
 
     /* CM55 owns the target -> host ring (m33_m55_shared SOCMEM region).     */
     ipc_ring_init(IPC_RING_TARGET_TO_HOST, IPC_RING_T2H_CAPACITY);
 
     /* Platform-specific IPC pipe setup (defined in shared/source) */
     cm55_ipc_communication_setup();
-
 }
 
 void ipc_interface_set_process_task(void *task_handle)
@@ -294,13 +252,13 @@ void ipc_interface_process(void)
 
 size_t ipc_interface_send_data(const uint8_t *data, size_t len)
 {
-    if (data == NULL || len == 0U || s_iface == NULL) {
+    if (data == NULL || len == 0U || !s_initialized) {
         return 0U;
     }
 
     /* Announce the total length up front so the host starts draining while we
      * stream; this is what lets back-pressure work when len exceeds the ring. */
-    s_iface->base.send(&s_iface->base, IPC_CMD_DATA_AVAIL, (uint32_t)len);
+    ipc_interface_send(IPC_CMD_DATA_AVAIL, (uint32_t)len);
 
     /* Write losslessly: append whatever fits, then block (bounded) for the
      * host to free space, until every byte is in the ring.                 */

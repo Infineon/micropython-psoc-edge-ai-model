@@ -1,19 +1,19 @@
 /*
  * tflm_engine.h — Public header for the TFLM engine (tflm_engine.c): wire
- * protocol, state machine, application callback contract, and engine API.
+ * protocol, state machine, and engine API.
  *
  * Copyright (c) 2026 Infineon Technologies AG
  * SPDX-License-Identifier: MIT
  */
 
-#ifndef TFLM_INTERFACE_H
-#define TFLM_INTERFACE_H
+#ifndef TFLM_ENGINE_H
+#define TFLM_ENGINE_H
 
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
-#include "ipc.h"
+#include "transport.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -24,119 +24,65 @@ extern "C" {
  * ═══════════════════════════════════════════════════════════════════════ */
 
 /* ── Commands: host (CM33) -> target (CM55) ──────────────────────────── */
-#define TFLM_CMD_MODEL_LOAD     (0x90U) /* value = byte offset of the .tflite model in the external-flash model partition */
-#define TFLM_CMD_MODEL_UNLOAD   (0x91U)
-#define TFLM_CMD_MODEL_RUN      (0x92U) /* start accepting TFLM_CMD_RUN_INFERENCE */
+#define TFLM_CMD_MODEL_LOAD     (0x90U) /* value = byte offset of the .tflite model in the external-flash model partition; only when unloaded */
+#define TFLM_CMD_MODEL_UNLOAD   (0x91U) /* release the model; valid when loaded or running */
+#define TFLM_CMD_MODEL_RUN      (0x92U) /* start accepting TFLM_CMD_RUN_INFERENCE; only when loaded */
 #define TFLM_CMD_MODEL_PAUSE    (0x93U) /* stop accepting TFLM_CMD_RUN_INFERENCE; model stays loaded */
 #define TFLM_CMD_RUN_INFERENCE  (0x94U) /* invoke on input bytes already staged via the bulk data ring */
+#define TFLM_CMD_MODEL_INFO     (0x95U) /* reply (bulk ring): input then output tflm_adapter_tensor_info_t, 64 bytes; needs a loaded model */
 
 /* ── Events: target (CM55) -> host (CM33) ────────────────────────────── */
 #define TFLM_EVT_READY           (0xB0U) /* engine initialised, no model loaded yet */
-#define TFLM_EVT_MODEL_LOADED    (0xB1U)
-#define TFLM_EVT_MODEL_UNLOADED  (0xB2U)
+#define TFLM_EVT_MODEL_LOADED    (0xB1U) /* ack of TFLM_CMD_MODEL_LOAD */
+#define TFLM_EVT_MODEL_UNLOADED  (0xB2U) /* ack of TFLM_CMD_MODEL_UNLOAD */
 #define TFLM_EVT_MODEL_RUNNING   (0xB3U) /* ack of TFLM_CMD_MODEL_RUN */
 #define TFLM_EVT_MODEL_PAUSED    (0xB4U) /* ack of TFLM_CMD_MODEL_PAUSE */
-/* No separate "result ready" event: tflm_engine_send_result() streams the
- * output bytes over the same bulk data ring used for input, whose doorbell
- * already tells the host the byte count is available. */
+/* No separate "result ready" event: inference output is streamed over the
+ * same bulk data ring used for input, whose doorbell already tells the host
+ * the byte count is available. */
 #define TFLM_EVT_ERROR           (0xE0U) /* value = a tflm_error_t */
 
 /* ── Error codes: reported alongside TFLM_EVT_ERROR ───────────────────── */
 typedef enum {
-    TFLM_ERR_NONE               = 0,
-    TFLM_ERR_BAD_STATE          = 1, /* command not valid in the current state */
-    TFLM_ERR_MODEL_LOAD_FAILED  = 2,
-    TFLM_ERR_INVOKE_FAILED      = 3,
+    TFLM_ERR_NONE               = 0, /* never sent; no error */
+    TFLM_ERR_BAD_STATE          = 1, /* command not valid in the current state, or unknown command */
+    TFLM_ERR_MODEL_LOAD_FAILED  = 2, /* adapter rejected the model at the given offset */
+    TFLM_ERR_INVOKE_FAILED      = 3, /* inference or tensor-info query failed, or the staged input overflowed the buffer */
 } tflm_error_t;
 
 /* ═══════════════════════════════════════════════════════════════════════
- * State machine — owned by the engine, driven entirely by host (CM33)commands
+ * Engine — singleton state machine over the wire protocol, driving tflm_adapter
+ * (engine/tflm/tflm_engine.c); driven entirely by host (CM33) commands
  * ═══════════════════════════════════════════════════════════════════════ */
-
-typedef enum {
-    TFLM_STATE_UNLOADED = 0, /* no model loaded */
-    TFLM_STATE_LOADED   = 1, /* tensors allocated, paused (not accepting inference) */
-    TFLM_STATE_RUNNING  = 2, /* accepting TFLM_CMD_RUN_INFERENCE */
-} tflm_state_t;
-
-/* ═══════════════════════════════════════════════════════════════════════
- * Application contract — implemented by framework/tflm/main.c, NOT by the
- * engine. The engine knows nothing about TFLM/tflite itself -- only the
- * wire protocol and state machine above. Each callback returns true on
- * success; the engine sends the matching TFLM_EVT_* reply (or
- * TFLM_EVT_ERROR) and advances the state machine accordingly. Any callback
- * pointer may be NULL if the model/runner has no extra work to do for that
- * command beyond the state transition itself.
- * ═══════════════════════════════════════════════════════════════════════ */
-
-typedef struct {
-    bool (*on_model_load)(uint32_t flash_offset); /* Load the model at `flash_offset` bytes into the external-flash model partition. */
-    bool (*on_model_unload)(void); /* Release the currently loaded model/interpreter. */
-    bool (*on_model_run)(void);
-    bool (*on_model_pause)(void);
-    /*
-     * Run one inference over `len` freshly-staged input bytes. On success,
-     * must call tflm_engine_send_result() with the output bytes before
-     * returning true.
-     */
-    bool (*on_run_inference)(const uint8_t *data, size_t len);
-} tflm_callbacks_t;
-
-/* ═══════════════════════════════════════════════════════════════════════
- * Engine — transport-agnostic state machine (engine/tflm/tflm_engine.c)
- * ═══════════════════════════════════════════════════════════════════════ */
-
-/* Engine instance: current state, the application callbacks above, and the
- * transport it talks to the host through. One per boot. */
-typedef struct {
-    tflm_state_t             state;
-    tflm_callbacks_t         callbacks;
-    transport_interface_t   *transport;
-} tflm_engine_t;
 
 /* ── Lifecycle ─────────────────────────────────────────────────────────── */
 
-/* Call once at boot, before starting the scheduler. Registers the engine's
- * receive callback and data sink with `transport`. */
-void tflm_engine_init(tflm_engine_t *engine, transport_interface_t *transport,
-    const tflm_callbacks_t *callbacks);
+/* Call once at boot, before starting the scheduler. Initialises `transport`
+ * and registers the engine's receive callback and data sink with it.
+ * `model_base` is the address (XIP-mapped) that TFLM_CMD_MODEL_LOAD's offset
+ * is added to. */
+void tflm_engine_init(const transport_interface_t *transport, uintptr_t model_base);
 
 /* Register the FreeRTOS task that IPC events (commands, bulk input bytes)
  * should wake; that task must call tflm_engine_process() when notified. */
-void tflm_engine_set_process_task(tflm_engine_t *engine, void *task_handle);
+void tflm_engine_set_process_task(void *task_handle);
 
 /* ── Event loop: call only from the task registered above ───────────────── */
 
 /*
- * Drain any pending bulk input bytes and dispatch any queued commands (via
- * tflm_engine_on_receive()). Call only from the task registered above.
+ * Drain any pending bulk input bytes and dispatch any queued commands.
+ * Call only from the task registered above.
  */
-void tflm_engine_process(tflm_engine_t *engine);
+void tflm_engine_process(void);
 
-/*
- * Dispatch entry point: call with every (cmd, value) the transport routes to
- * this engine's client id. Not reentrant -- call only from the single task
- * that owns this engine (see framework/tflm/main.c).
- */
-void tflm_engine_on_receive(tflm_engine_t *engine, uint8_t cmd, uint32_t value);
-
-/* ── Queries & notifications ──────────────────────────────────────────── */
-
-tflm_state_t tflm_engine_get_state(const tflm_engine_t *engine);
+/* ── Notifications ────────────────────────────────────────────────────── */
 
 /* Send TFLM_EVT_READY to the host. Call once boot-time setup is complete. */
-void tflm_engine_notify_ready(tflm_engine_t *engine);
-
-/*
- * Send inference output bytes to the host over the bulk data ring. Call
- * from inside on_run_inference() once inference succeeds. Returns the number
- * of bytes actually accepted (may be < len if the transport stalls).
- */
-size_t tflm_engine_send_result(tflm_engine_t *engine, const uint8_t *data, size_t len);
+void tflm_engine_notify_ready(void);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* TFLM_INTERFACE_H */
+#endif /* TFLM_ENGINE_H */
 

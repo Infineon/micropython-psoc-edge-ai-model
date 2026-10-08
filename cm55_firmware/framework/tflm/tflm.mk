@@ -86,37 +86,17 @@ INCLUDES += \
 
 FRAMEWORK_DIR := $(BOARD_DIR)/framework/tflm
 TFLM_ENGINE_DIR := $(BOARD_DIR)/engine/tflm
+TFLM_ADAPTER_DIR := $(BOARD_DIR)/adapters/tflm
 FRAMEWORK_C_SRCS := \
     $(FRAMEWORK_DIR)/main.c \
     $(TFLM_ENGINE_DIR)/tflm_engine.c \
     $(APP_DIR)/sources/transport/ipc.c \
     $(SHARED_DIR)/source/COMPONENT_CM55/cm55_ipc_communication.c
-
-# Edge Impulse MFE DSP front-end for the "hey edge" KWS. Only the DSP
-# subset is compiled
-EI_DIR := $(REPO_ROOT)/deps/edge-impulse-sdk
-KWS_DIR := $(FRAMEWORK_DIR)/edge-impulse-kws
-
-EI_COMPAT_DIR := $(BUILD_DIR)/ei-compat
-$(shell mkdir -p $(EI_COMPAT_DIR)/model-parameters && printf '#include "%s"\n' '$(abspath $(KWS_DIR)/model_metadata.h)' > $(EI_COMPAT_DIR)/model-parameters/model_metadata.h)
-
-EI_CXX_SRCS := \
-    $(KWS_DIR)/kws_frontend.cpp \
-    $(EI_DIR)/dsp/memory.cpp \
-    $(EI_DIR)/dsp/kissfft/kiss_fft.cpp \
-    $(EI_DIR)/dsp/kissfft/kiss_fftr.cpp \
-    $(EI_DIR)/porting/clib/ei_classifier_porting.cpp
-
-DEFINES += -DEIDSP_USE_CMSIS_DSP=0 -DEI_PORTING_CLIB=1
-
-FRAMEWORK_CXX_SRCS := $(FRAMEWORK_DIR)/tflm_runner.cpp $(EI_CXX_SRCS)
+FRAMEWORK_CXX_SRCS := $(TFLM_ADAPTER_DIR)/adapter.cpp
 
 INCLUDES += \
-    -I$(FRAMEWORK_DIR) \
-    -I$(KWS_DIR) \
-    -I$(EI_COMPAT_DIR) \
-    -I$(REPO_ROOT)/deps \
-    -I$(TFLM_ENGINE_DIR)
+    -I$(TFLM_ENGINE_DIR) \
+    -I$(TFLM_ADAPTER_DIR)
 
 ALL_C_SRCS   := $(FRAMEWORK_C_SRCS) $(BSP_C_SRCS) $(LIB_C_SRCS)
 ALL_CXX_SRCS := $(FRAMEWORK_CXX_SRCS) $(LIB_CXX_SRCS)
