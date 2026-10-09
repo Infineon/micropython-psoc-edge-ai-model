@@ -36,13 +36,27 @@ bool tflm_adapter_load(const uint8_t *model_data);
  * nothing is loaded. */
 void tflm_adapter_unload(void);
 
-/* Copy `len` bytes into input tensor 0 (rejected if it doesn't match the
- * tensor's byte size), run inference, then copy output tensor 0's raw bytes
- * into `out` (up to `out_capacity`). `*out_len` receives the number of bytes
- * written. Returns false if no model is loaded, the input size doesn't
- * match, invocation fails, or the output doesn't fit in `out_capacity`. */
+/* Run one inference: preprocess `len` host bytes into input tensor 0, Invoke(),
+ * then copy output tensor 0's raw bytes into `out` (up to `out_capacity`;
+ * `*out_len` receives the count). The host decodes those bytes using the
+ * metadata from tflm_adapter_get_info(). Returns false if no model is loaded,
+ * preprocess/invoke fails, or the output does not fit in `out_capacity`. */
 bool tflm_adapter_invoke(const uint8_t *data, size_t len,
     uint8_t *out, size_t out_capacity, size_t *out_len);
+
+/* ---- Optional model-specific input transform -------------------------------
+ * tflm_adapter_invoke() calls this before Invoke(). It has a weak identity
+ * default (host bytes ARE the input tensor bytes), so a generic model needs
+ * nothing. A model whose host-facing bytes differ from its input tensor layout
+ * (e.g. PCM -> quantized features) defines a STRONG override in its own
+ * translation unit. 
+ * 
+ * preprocess: turn `in`/`in_len` into input tensor 0. Write up to
+ * `tensor_capacity` (== the input tensor's byte size) bytes into `tensor` and
+ * set `*tensor_len`; invoke fails unless `*tensor_len` fills the tensor exactly.
+ * May call tflm_adapter_get_info() for scale/zero_point/shape. */
+bool tflm_adapter_preprocess(const uint8_t *in, size_t in_len,
+    uint8_t *tensor, size_t tensor_capacity, size_t *tensor_len);
 
 /* Description of one tensor, little-endian, 32 bytes (sent to the host as is). */
 typedef struct {
