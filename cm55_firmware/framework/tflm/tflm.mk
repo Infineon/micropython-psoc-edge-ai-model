@@ -99,11 +99,9 @@ INCLUDES += \
     -I$(TFLM_ADAPTER_DIR)
 
 # ── Optional "hey edge" KWS front-end (KWS=1) ────────────────────────────────
-# Layers the Edge Impulse MFE DSP front-end on top of the generic engine. The
-# engine stages raw int16 PCM and calls tflm_adapter_invoke(); -Wl,--wrap
-# redirects that to kws_frontend.cpp's __wrap_tflm_adapter_invoke, which runs
-# MFE + quantize, feeds the features to __real_tflm_adapter_invoke, and returns
-# the decoded result bytes. Build: `make FRAMEWORK=tflm KWS=1`.
+# Adds the Edge Impulse MFE DSP front-end on top of the generic engine.
+# kws_frontend.cpp overrides the adapter's weak preprocess hook (PCM -> MFE +
+# quantize) so the model gets its features. Build: `make FRAMEWORK=tflm KWS=1`.
 ifeq ($(KWS),1)
 EI_DIR        := $(REPO_ROOT)/deps/edge-impulse-sdk
 KWS_DIR       := $(FRAMEWORK_DIR)/edge-impulse-kws
@@ -127,7 +125,6 @@ INCLUDES += \
     -I$(REPO_ROOT)/deps
 
 DEFINES += -DEIDSP_USE_CMSIS_DSP=0 -DEI_PORTING_CLIB=1
-LDFLAGS += -Wl,--wrap=tflm_adapter_invoke
 endif
 
 ALL_C_SRCS   := $(FRAMEWORK_C_SRCS) $(BSP_C_SRCS) $(LIB_C_SRCS)
