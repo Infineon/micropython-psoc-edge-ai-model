@@ -14,6 +14,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 
 /* model_metadata.h first so the EI headers see the model's macro context
  * (inferencing engine, datatypes). It only pulls ei_constants.h -- not the
@@ -65,8 +66,18 @@ static float s_features[KWS_FEATURE_COUNT];
 extern "C" bool tflm_adapter_preprocess(const uint8_t *in, size_t in_len,
     uint8_t *tensor, size_t tensor_capacity, size_t *tensor_len)
 {
-    if (in == nullptr || tensor == nullptr || tensor_capacity < KWS_FEATURE_COUNT) {
+    if (in == nullptr || tensor == nullptr) {
         return false;
+    }
+
+    /* Not the KWS model: pass bytes through like the adapter's weak default. */
+    if (tensor_capacity != KWS_FEATURE_COUNT) {
+        if (in_len != tensor_capacity) {
+            return false;
+        }
+        std::memcpy(tensor, in, in_len);
+        *tensor_len = in_len;
+        return true;
     }
 
     s_pcm = reinterpret_cast<const int16_t *>(in);
