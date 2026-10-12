@@ -17,11 +17,18 @@ jobs:
       matrix:
         config: [Debug]
         framework: [deepcraft, tflm]
+        kws: [0]
         include:
           - framework: deepcraft
             appname: deepcraft
           - framework: tflm
             appname: tflm
+          # tflm with the Edge Impulse "hey edge" KWS front-end compiled in.
+          - config: Debug
+            framework: tflm
+            appname: tflm
+            kws: 1
+            variant: -kws
 
     steps:
       - uses: actions/checkout@v7
@@ -46,12 +53,12 @@ jobs:
             -v ${{ github.workspace }}:/workspace \
             -w /workspace/cm55_firmware \
             ${{ env.TOOLCHAIN_IMAGE }} \
-            make CONFIG=${{ matrix.config }} FRAMEWORK=${{ matrix.framework }} APPNAME=${{ matrix.appname }}
+            make CONFIG=${{ matrix.config }} FRAMEWORK=${{ matrix.framework }} APPNAME=${{ matrix.appname }} KWS=${{ matrix.kws }}
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: firmware-${{ matrix.framework }}-${{ matrix.config }}
+          name: firmware-${{ matrix.framework }}${{ matrix.variant }}-${{ matrix.config }}
           path: |
             cm55_firmware/build/${{ matrix.config }}/${{ matrix.appname }}.elf
             cm55_firmware/build/${{ matrix.config }}/${{ matrix.appname }}.hex
