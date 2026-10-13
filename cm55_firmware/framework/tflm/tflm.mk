@@ -103,28 +103,14 @@ INCLUDES += \
 # kws_frontend.cpp overrides the adapter's weak preprocess hook (PCM -> MFE +
 # quantize) so the model gets its features. Build: `make FRAMEWORK=tflm KWS=1`.
 ifeq ($(KWS),1)
-EI_DIR        := $(REPO_ROOT)/deps/edge-impulse-sdk
-KWS_DIR       := $(FRAMEWORK_DIR)/edge-impulse-kws
-EI_COMPAT_DIR := $(BUILD_DIR)/ei-compat
+KWS_DIR := $(FRAMEWORK_DIR)/edge-impulse-kws
 
-# Vendored EI headers #include "model-parameters/model_metadata.h" with that
-# literal prefix; the exported metadata lives flat in edge-impulse-kws, so
-# synthesize a one-line forwarding header under the build tree (wiped by clean).
-$(shell mkdir -p $(EI_COMPAT_DIR)/model-parameters && printf '#include "%s"\n' '$(abspath $(KWS_DIR)/model_metadata.h)' > $(EI_COMPAT_DIR)/model-parameters/model_metadata.h)
+FRAMEWORK_CXX_SRCS += $(KWS_DIR)/kws_frontend.cpp
 
-FRAMEWORK_CXX_SRCS += \
-    $(KWS_DIR)/kws_frontend.cpp \
-    $(EI_DIR)/dsp/memory.cpp \
-    $(EI_DIR)/dsp/kissfft/kiss_fft.cpp \
-    $(EI_DIR)/dsp/kissfft/kiss_fftr.cpp \
-    $(EI_DIR)/porting/clib/ei_classifier_porting.cpp
-
-INCLUDES += \
-    -I$(KWS_DIR) \
-    -I$(EI_COMPAT_DIR) \
-    -I$(REPO_ROOT)/deps
-
-DEFINES += -DEIDSP_USE_CMSIS_DSP=0 -DEI_PORTING_CLIB=1
+# Committed prebuilt archive: EI SDK sources (memory, kissfft, clib porting) plus
+# kws_mfe_extract() (MFE DSP for the model). No EI headers are needed to build.
+EI_SDK_LIB := $(REPO_ROOT)/deps/libedge-impulse-sdk.a
+$(if $(wildcard $(EI_SDK_LIB)),,$(error $(EI_SDK_LIB) not found))
 endif
 
 ALL_C_SRCS   := $(FRAMEWORK_C_SRCS) $(BSP_C_SRCS) $(LIB_C_SRCS)
@@ -247,10 +233,12 @@ $(TFLM_CORE_LIB): $(CORE_OBJS) | $(BUILD_DIR)/obj
 endif
 
 OBJS_RSP := $(BUILD_DIR)/objects.rsp
-$(ELF): $(ALL_OBJS) $(TFLM_CORE_LIB) $(LDLIBS) | $(BUILD_DIR)/obj
+# EI lib must precede tflm-core.a: both export kiss_fft* symbols, and EI's MFE
+# needs its own (float) build, so the first archive in the group must be EI's.
+$(ELF): $(ALL_OBJS) $(TFLM_CORE_LIB) $(EI_SDK_LIB) $(LDLIBS) | $(BUILD_DIR)/obj
 	@echo   LD  $@
 	$(file >$(OBJS_RSP),$(ALL_OBJS))
-	@$(LD) $(LDFLAGS) -o $@ -Wl,--start-group @$(OBJS_RSP) $(TFLM_CORE_LIB) $(LDLIBS) -Wl,--end-group $(LD_EXTRA_LIBS)
+	@$(LD) $(LDFLAGS) -o $@ -Wl,--start-group @$(OBJS_RSP) $(EI_SDK_LIB) $(TFLM_CORE_LIB) $(LDLIBS) -Wl,--end-group $(LD_EXTRA_LIBS)
 
 $(HEX): $(ELF)
 	@echo   HEX $@

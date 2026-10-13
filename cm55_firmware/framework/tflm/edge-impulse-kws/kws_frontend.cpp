@@ -13,51 +13,18 @@
  */
 
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 
-/* model_metadata.h first so the EI headers see the model's macro context
- * (inferencing engine, datatypes). It only pulls ei_constants.h -- not the
- * colliding inferencing_engines/ engine headers that model_variables.h does. */
-#include "model_metadata.h"
-#include "edge-impulse-sdk/classifier/ei_run_dsp.h"
-
 #include "adapter.h"
 
-/* Model I/O geometry, tracked from the exported metadata. */
-#define KWS_FEATURE_COUNT   (EI_CLASSIFIER_NN_INPUT_FRAME_SIZE)
-#define KWS_SAMPLE_RATE_HZ  (16000.0f)
+/* Model input geometry (7920 int8 MFE features). */
+#define KWS_FEATURE_COUNT   (7920U)
 
-/* MFE DSP block 7 config, copied verbatim from the exported model_variables.h
- * (positional order matches ei_dsp_config_mfe_t). named_axes is unused by
- * extract_mfe_features, so it is left null. */
-static const ei_dsp_config_mfe_t s_mfe_config = {
-    7,        /* block_id               */
-    4,        /* implementation_version */
-    1,        /* axes                   */
-    nullptr,  /* named_axes             */
-    0,        /* named_axes_size        */
-    0.02f,    /* frame_length           */
-    0.01f,    /* frame_stride           */
-    40,       /* num_filters            */
-    256,      /* fft_length             */
-    0,        /* low_frequency          */
-    0,        /* high_frequency         */
-    101,      /* win_size               */
-    -100,     /* noise_floor_db         */
-};
-
-/* Front-end runs on the single tflm-task. EI feeds audio as raw 
- * int16 cast to float. */
-static const int16_t *s_pcm = nullptr;
-
-static int pcm_get_data(size_t offset, size_t length, float *out_ptr)
-{
-    for (size_t i = 0U; i < length; i++) {
-        out_ptr[i] = static_cast<float>(s_pcm[offset + i]);
-    }
-    return EIDSP_OK;
-}
+/* MFE DSP; lives in deps/libedge-impulse-sdk.a. */
+extern "C" bool kws_mfe_extract(const int16_t *pcm, size_t n_samples,
+    float *features, size_t n_features);
 
 static float s_features[KWS_FEATURE_COUNT];
 
@@ -80,15 +47,8 @@ extern "C" bool tflm_adapter_preprocess(const uint8_t *in, size_t in_len,
         return true;
     }
 
-    s_pcm = reinterpret_cast<const int16_t *>(in);
-
-    signal_t signal;
-    signal.total_length = in_len / sizeof(int16_t);
-    signal.get_data = &pcm_get_data;
-
-    matrix_t features(1, KWS_FEATURE_COUNT, s_features);
-    if (extract_mfe_features(&signal, &features, (void *)&s_mfe_config,
-            KWS_SAMPLE_RATE_HZ) != EIDSP_OK) {
+    if (!kws_mfe_extract(reinterpret_cast<const int16_t *>(in),
+            in_len / sizeof(int16_t), s_features, KWS_FEATURE_COUNT)) {
         return false;
     }
 
