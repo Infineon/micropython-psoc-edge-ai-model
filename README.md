@@ -1,178 +1,64 @@
 # MicroPython PSOC™ Edge AI Model
 
-This repo hosts MicroPython-based deployment enablements for running embedded AI models on **PSOC™ Edge** boards. It currently supports [DEEPCRAFT™ Voice Assistant](https://deepcraft.infineon.com/solutions/voice-assistant) models.
+This repo hosts dual core based deployment enablements for running embedded AI models on **PSOC™ Edge** boards, built around `cm55_firmware`'s pluggable framework system (`make FRAMEWORK=<name>`).
 
-## DEEPCRAFT™ Voice Assistant
+## Supported Frameworks
 
-A single Python script that takes a DEEPCRAFT™ Voice Assistant model and gets it running on a **PSOC™ Edge KIT_PSE84_AI** board — firmware is built and flashed in one command.
+| Framework | What it runs | Docs |
+|---|---|---|
+| `deepcraft` | [DEEPCRAFT™ Voice Assistant](https://deepcraft.infineon.com/solutions/voice-assistant) wake-word + command models | [cm55_firmware/framework/deepcraft/README.md](cm55_firmware/framework/deepcraft/README.md) |
+| `tflm` | Arbitrary `.tflite` models loaded at runtime from external flash | [cm55_firmware/framework/tflm/README.md](cm55_firmware/framework/tflm/README.md) |
 
----
-
-## Setup
-
-From the repository root, switch to the `tools/` folder where the deploy script and its config template live:
-
-```powershell
-cd tools
-```
-
-Set your LLVM toolchain path in `deepcraft-voice-assistant-model-deploy.ini`:
-
-```ini
-[tools]
-llvm_dir = C:/llvm/LLVM-ET-Arm-19.1.5-Windows-x86_64
-```
-
-This avoids the interactive LLVM setup prompt. OpenOCD is downloaded automatically if not found.
-
----
-
-## Deploy a model
-
-```powershell
-python deepcraft-voice-assistant-model-deploy.py \
-    --config-file deepcraft-voice-assistant-model-deploy.ini \
-    all path\to\your_model
-```
-
-`all` clones the firmware repo, builds with your model, and flashes to the board.
-The model can be a folder or a `.zip` exported from the [DEEPCRAFT™ cloud tool](https://deepcraft.infineon.com/solutions/voice-assistant).
-
-Other commands:
-
-| Command | Description |
-|---------|-------------|
-| `build <MODEL>` | Build only (also clones/updates the repo) |
-| `flash` | Flash the last built `.hex` |
-| `clean` | Remove build artifacts for a clean rebuild |
-
-### For primary users
-
-You don't need a full checkout of this repo — just download the script itself:
-
-```powershell
-curl -s -L -o deepcraft-voice-assistant-model-deploy.py https://raw.githubusercontent.com/Infineon/micropython-psoc-edge-ai-model/main/tools/deepcraft-voice-assistant-model-deploy.py
-```
-
-Leave `repo_dir` blank in the config file (the default). The tool then manages its
-own private copy of the firmware — cloning it under `va-mpy/` next to the script
-on first run and updating it on later runs — so your model builds against a
-known-good checkout regardless of what else is on disk.
-
-Once `build` or `all` has finished, flash the board (`all` already does this for you):
-
-```powershell
-python deepcraft-voice-assistant-model-deploy.py all <model-name>
-```
-
-### For secondary users (firmware / script contributors)
-
-Clone the full repo instead of just the script, so you have `cm55_firmware/` and
-`tools/` to edit:
-
-```sh
-git clone --recurse-submodules https://github.com/Infineon/micropython-psoc-edge-ai-model.git
-
-cd micropython-psoc-edge-ai-model/tools
-```
-
-Then point the tool at this checkout instead of letting it manage a separate copy,
-so your local changes are picked up immediately without pushing or re-cloning:
-
-```ini
-[project]
-repo_dir = ..
-```
-
-Or, without touching the config file:
-
-```powershell
-python deepcraft-voice-assistant-model-deploy.py \
-    --repo-dir .. \
-    --config-file deepcraft-voice-assistant-model-deploy.ini \
-    build test_gpio_control
-```
-
-`--repo-dir` skips the clone/update step entirely and builds `cm55_firmware/` as it
-sits in your working tree, so re-running `build` after an edit picks it up right away.
+Each framework lives under `cm55_firmware/framework/<name>/` and is built with `make FRAMEWORK=<name>`; see its own README for setup, deployment, and usage specifics.
 
 ---
 
 ## Build Firmware
 
-Choose one of the following workflows.
-
-### Option 1: Clone On The Host
-
-Use this workflow when Git is installed on the host. Clone the firmware and
-open its root directory before running Docker.
-
 ```sh
 git clone --recurse-submodules https://github.com/Infineon/micropython-psoc-edge-ai-model.git
+cd micropython-psoc-edge-ai-model/cm55_firmware
 
-cd micropython-psoc-edge-ai-model
+make submodules                    # one-time: fetch deps/psoc-edge
+make FRAMEWORK=<name>              # build (CONFIG=Debug|Release, default Debug)
+make FRAMEWORK=<name> deploy       # build (if needed) and flash via OpenOCD
+make FRAMEWORK=<name> clean        # remove build artifacts
+make help                          # list available frameworks
 ```
 
-From this directory, which contains `cm55_firmware/`, run the following
-commands. Docker mounts the checkout at `/workspace`; `-w` selects the
-project's build directory inside it.
-
-WSL with docker installed:
+Or in Docker, without installing the toolchain locally:
 
 ```sh
 docker run --rm \
 	-v "$PWD":/workspace \
 	-w /workspace/cm55_firmware \
-	ifxmakers/psoc-embedded-ai-toolchain:deepcraft-0.1.0 \
-	make CONFIG=Debug FRAMEWORK=deepcraft
+	ifxmakers/psoc-embedded-ai-toolchain:toolchains-0.1.0 \
+	make CONFIG=Debug FRAMEWORK=<name>
 ```
 
-### Option 2: Clone Inside Docker
+Flashing needs USB access to the board's debug probe (`--device=/dev/bus/usb` on
+Linux/WSL; see [usbipd-win](https://github.com/dorssel/usbipd-win) to attach the
+probe to WSL). Build-only steps do not need it.
 
-```sh
-mkdir firmware-build
+Some frameworks have extra prerequisites or build variables (e.g. `tflm` requires
+`TOOLCHAIN=GCC_ARM`) — check that framework's own README, linked above.
 
-docker run --rm \
-	-v "$PWD/firmware-build":/workspace \
-	--entrypoint sh \
-	ifxmakers/psoc-embedded-ai-toolchain:deepcraft-0.1.0 \
-	-c 'git clone --recurse-submodules https://github.com/Infineon/micropython-psoc-edge-ai-model.git . &&
-	     cd cm55_firmware &&
-	     make CONFIG=Debug FRAMEWORK=deepcraft'
-```
+---
 
-The checkout and build outputs remain in `firmware-build` after the container
-exits.
+## Adding a New Framework
 
-## Flash Firmware
-
-The image includes Infineon's OpenOCD fork, which supports the KitProg3
-interface and PSE84 target configs.
-
-Flashing requires USB access to the board's debug probe, which build commands
-do not need. On Linux, pass the USB bus through explicitly:
-
-```sh
-docker run --rm \
-	--device=/dev/bus/usb \
-	-v "$PWD":/workspace \
-	-w /workspace/cm55_firmware \
-	ifxmakers/psoc-embedded-ai-toolchain:deepcraft-0.1.0 \
-	make CONFIG=Debug FRAMEWORK=deepcraft flash
-```
-
-On WSL, attach the debug probe to the WSL distribution first using
-[usbipd-win](https://github.com/dorssel/usbipd-win) before running the command
-above. Direct USB passthrough to Windows Docker Desktop containers is not
-generally supported.
+1. Create `cm55_firmware/framework/<name>/` with your CM55 entry point
+   (`main.c`) and a `<name>.mk` (see `tflm.mk` if your
+   framework needs non-default build rules, e.g. a fixed toolchain).
+2. Build it with `make FRAMEWORK=<name>` from `cm55_firmware/` — no changes to
+   the top-level `Makefile` are needed; it discovers frameworks by directory.
+3. Document the framework in `cm55_firmware/framework/<name>/README.md`
+   (prerequisites, build/flash commands, wire protocol or usage notes).
+4. Add a row to the [Supported Frameworks](#supported-frameworks) table above.
 
 ---
 
 ## Documentation
 
-| Guide | Contents |
-|-------|----------|
-| [Quick Start](https://mpy-va-deploy.readthedocs.io/en/latest/enablement_cm33_mpy_ipc.html#quickstart) | CM33 MicroPython over IPC — requirements, steps, example code |
-| [Deployment Tool](https://mpy-va-deploy.readthedocs.io/en/latest/deployment_tool.html) | Installation, commands, options, config file |
-| [Requirements](https://mpy-va-deploy.readthedocs.io/en/latest/requirements.html) | Hardware, toolchain, and software prerequisites |
-| [MicroPython Interface](https://github.com/Infineon/micropython-deepcraft-model-interface) | CM33-side MicroPython API |
+See each framework's own README (linked above) for detailed guides.
+
