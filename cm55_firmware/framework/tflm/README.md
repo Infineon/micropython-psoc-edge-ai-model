@@ -102,7 +102,7 @@ force a from-source build.
 
 ### Build and flash the CM33 MicroPython firmware
 
-From micropython-psoc-edge branch - [poc-tflm-audio-ipc](https://github.com/Infineon/micropython-psoc-edge/tree/poc-tflm-audio-ipc/ports/psoc-edge)
+From micropython-psoc-edge branch - [poc-tflm-model-execution](https://github.com/Infineon/micropython-psoc-edge/tree/poc-tflm-model-execution/ports/psoc-edge)
 
 ```bash
 make BOARD=KIT_PSE84_AI
