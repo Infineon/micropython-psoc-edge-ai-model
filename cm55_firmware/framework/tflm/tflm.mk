@@ -103,7 +103,7 @@ INCLUDES += \
 # kws_frontend.cpp overrides the adapter's weak preprocess hook (PCM -> MFE +
 # quantize) so the model gets its features. Build: `make FRAMEWORK=tflm KWS=1`.
 ifeq ($(KWS),1)
-KWS_DIR := $(FRAMEWORK_DIR)/edge-impulse-kws
+KWS_DIR := $(FRAMEWORK_DIR)/kws
 
 FRAMEWORK_CXX_SRCS += $(KWS_DIR)/kws_frontend.cpp
 
