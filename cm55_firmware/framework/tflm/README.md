@@ -30,7 +30,6 @@ being compiled into the firmware.
 | [cm55_firmware/engine/tflm/tflm_engine.h](../../cm55_firmware/engine/tflm/tflm_engine.h) | Wire protocol (commands, events, error codes) and engine API. |
 | [cm55_firmware/engine/tflm/tflm_engine.c](../../cm55_firmware/engine/tflm/tflm_engine.c) | Transport-agnostic state machine, command queue, input/output buffers. |
 | [cm55_firmware/adapters/tflm/adapter.h](../../cm55_firmware/adapters/tflm/adapter.h) / [adapter.cpp](../../cm55_firmware/adapters/tflm/adapter.cpp) | Wraps `tflite::MicroInterpreter` in a flat C API (`load`, `get_info`, `invoke`, weak `preprocess`). |
-| [cm55_firmware/framework/tflm/edge-impulse-kws/kws_frontend.cpp](../../cm55_firmware/framework/tflm/edge-impulse-kws/kws_frontend.cpp) | KWS preprocess override: PCM to MFE features to int8 (build with `KWS=1`). |
 | [cm55_firmware/sources/transport/ipc.c](../../cm55_firmware/sources/transport/ipc.c) | IPC implementation of `transport_interface_t`. |
 | [shared/include/ipc_ring.h](../../shared/include/ipc_ring.h) | Two 64 KB lock-free byte rings in shared SRAM (CM33→CM55 and CM55→CM33). |
 | `deps/tflm/tflite-micro` | Upstream tflite-micro (git submodule). |
@@ -46,10 +45,9 @@ extra C module is needed.
 | Application | CM33 script | Model | Build |
 | --- | --- | --- | --- |
 | Sine wave regression (hello world) | `ports/psoc-edge/examples/tflm/sine_model_ipc.py` | `hello_world_int8.tflite` (also `hello_world_float.tflite`) | `make FRAMEWORK=tflm` |
-| "hey edge" keyword spotting from the live PDM mic | `ports/psoc-edge/examples/tflm/hey_edge_mic_ipc.py` | `keyword_spotting_demo.tflite` (Edge Impulse project 1128757) | `make FRAMEWORK=tflm KWS=1` |
+| "hey edge" keyword spotting from the live PDM mic | `ports/psoc-edge/examples/tflm/hey_edge_mic_ipc.py` | `keyword_spotting_demo.tflite` | `make FRAMEWORK=tflm KWS=1` |
 
-One `KWS=1` image runs **both** applications: the KWS preprocess falls back to
-pass-through for any model whose input tensor is not 7920 bytes, so switching
+One `KWS=1` image runs **both** applications, so switching
 between them only needs a different model file and script, no reflash.
 
 ## Wire protocol
@@ -104,22 +102,20 @@ force a from-source build.
 
 ### Build and flash the CM33 MicroPython firmware
 
-From `micropython-psoc-edge repository`:
+From micropython-psoc-edge branch - [poc-tflm-audio-ipc](https://github.com/Infineon/micropython-psoc-edge/tree/poc-tflm-audio-ipc/ports/psoc-edge)
 
 ```bash
 make BOARD=KIT_PSE84_AI
 make deploy BOARD=KIT_PSE84_AI
 ```
 
-Flash CM33 first, then CM55. The CM33 secure image must map the shared-data flash range for CM55 (MPC region), which the MicroPython port provides.
+Flash CM33 first, then CM55.
 
 ### Build and flash the CM55 firmware
 
-From `cm55 repository`:
+From micropython-psoc-edge-ai-model branch - [poc-runtime-model-loading](https://github.com/Infineon/micropython-psoc-edge-ai-model/tree/poc-runtime-model-loading)
 
 ```bash
-make clean FRAMEWORK=tflm            # needed when switching frameworks (shared build dir)
-make FRAMEWORK=tflm                  # sine model only
 make FRAMEWORK=tflm KWS=1            # sine + hey_edge KWS
 make deploy FRAMEWORK=tflm KWS=1     # build (if needed) and flash via OpenOCD
 ```
@@ -129,14 +125,9 @@ Output: `build/Debug/tflm.elf`, `.hex`, `.bin`. Variables: `CONFIG=Debug|Release
 
 ### Copy the models and scripts
 
-From micropython repository path : `../ports/psoc-edge/examples/tflm`:
-
-```bash
-mpremote cp hello_world_int8.tflite :
-mpremote cp keyword_spotting_demo.tflite :
-```
-
-The scripts open the model by relative path on the device filesystem.
+Download the models and load them to the filesystem of the device. They are in the micropython repository
+path `ports/psoc-edge/examples/tflm`. See the file transfer section of
+[mpy-usage.rst](https://github.com/Infineon/micropython-psoc-edge/blob/poc-tflm-audio-ipc/docs/psoc-edge/mpy-usage.rst).
 
 ## Using the applications
 
