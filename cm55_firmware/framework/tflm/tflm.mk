@@ -98,6 +98,21 @@ INCLUDES += \
     -I$(TFLM_ENGINE_DIR) \
     -I$(TFLM_ADAPTER_DIR)
 
+# ── Optional "hey edge" KWS front-end (KWS=1) ────────────────────────────────
+# Adds the Edge Impulse MFE DSP front-end on top of the generic engine.
+# kws_frontend.cpp overrides the adapter's weak preprocess hook (PCM -> MFE +
+# quantize) so the model gets its features. Build: `make FRAMEWORK=tflm KWS=1`.
+ifeq ($(KWS),1)
+KWS_DIR := $(FRAMEWORK_DIR)/edge-impulse-kws
+
+FRAMEWORK_CXX_SRCS += $(KWS_DIR)/kws_frontend.cpp
+
+# Committed prebuilt archive: EI SDK sources (memory, kissfft, clib porting) plus
+# kws_mfe_extract() (MFE DSP for the model). No EI headers are needed to build.
+EI_SDK_LIB := $(REPO_ROOT)/deps/libedge-impulse-sdk.a
+$(if $(wildcard $(EI_SDK_LIB)),,$(error $(EI_SDK_LIB) not found))
+endif
+
 ALL_C_SRCS   := $(FRAMEWORK_C_SRCS) $(BSP_C_SRCS) $(LIB_C_SRCS)
 ALL_CXX_SRCS := $(FRAMEWORK_CXX_SRCS) $(LIB_CXX_SRCS)
 ALL_S_SRCS   := $(LIB_S_SRCS)
@@ -218,10 +233,12 @@ $(TFLM_CORE_LIB): $(CORE_OBJS) | $(BUILD_DIR)/obj
 endif
 
 OBJS_RSP := $(BUILD_DIR)/objects.rsp
-$(ELF): $(ALL_OBJS) $(TFLM_CORE_LIB) $(LDLIBS) | $(BUILD_DIR)/obj
+# EI lib must precede tflm-core.a: both export kiss_fft* symbols, and EI's MFE
+# needs its own (float) build, so the first archive in the group must be EI's.
+$(ELF): $(ALL_OBJS) $(TFLM_CORE_LIB) $(EI_SDK_LIB) $(LDLIBS) | $(BUILD_DIR)/obj
 	@echo   LD  $@
 	$(file >$(OBJS_RSP),$(ALL_OBJS))
-	@$(LD) $(LDFLAGS) -o $@ -Wl,--start-group @$(OBJS_RSP) $(TFLM_CORE_LIB) $(LDLIBS) -Wl,--end-group $(LD_EXTRA_LIBS)
+	@$(LD) $(LDFLAGS) -o $@ -Wl,--start-group @$(OBJS_RSP) $(EI_SDK_LIB) $(TFLM_CORE_LIB) $(LDLIBS) -Wl,--end-group $(LD_EXTRA_LIBS)
 
 $(HEX): $(ELF)
 	@echo   HEX $@

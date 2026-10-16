@@ -216,6 +216,19 @@ extern "C" bool tflm_adapter_get_info(tflm_adapter_tensor_info_t *in, tflm_adapt
     return true;
 }
 
+/* Weak identity transform: host bytes ARE the input tensor bytes. A model
+ * overrides this (strongly) to inject custom input processing. */
+extern "C" __attribute__((weak)) bool tflm_adapter_preprocess(const uint8_t *in,
+    size_t in_len, uint8_t *tensor, size_t tensor_capacity, size_t *tensor_len)
+{
+    if (in == nullptr || in_len != tensor_capacity) {
+        return false;
+    }
+    std::memcpy(tensor, in, in_len);
+    *tensor_len = in_len;
+    return true;
+}
+
 extern "C" bool tflm_adapter_invoke(const uint8_t *data, size_t len,
     uint8_t *out, size_t out_capacity, size_t *out_len)
 {
@@ -224,10 +237,16 @@ extern "C" bool tflm_adapter_invoke(const uint8_t *data, size_t len,
     }
 
     TfLiteTensor *input = interpreter->input(0);
-    if (input == nullptr || input->data.raw == nullptr || len != input->bytes) {
+    if (input == nullptr || input->data.raw == nullptr) {
         return false;
     }
-    std::memcpy(input->data.raw, data, len);
+
+    size_t tensor_len = 0U;
+    if (!tflm_adapter_preprocess(data, len,
+            reinterpret_cast<uint8_t *>(input->data.raw), input->bytes, &tensor_len) ||
+        tensor_len != input->bytes) {
+        return false;
+    }
 
     if (interpreter->Invoke() != kTfLiteOk) {
         return false;
