@@ -11,12 +11,24 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     env:
-      TOOLCHAIN_IMAGE: ifxmakers/psoc-embedded-ai-toolchain:deepcraft-latest
+      TOOLCHAIN_IMAGE: ifxmakers/psoc-embedded-ai-toolchain:toolchains-0.1.0
 
     strategy:
       matrix:
         config: [Debug]
-        framework: [deepcraft]
+        framework: [deepcraft, tflm]
+        kws: [0]
+        include:
+          - framework: deepcraft
+            appname: deepcraft
+          - framework: tflm
+            appname: tflm
+          # tflm with the Edge Impulse "hey edge" KWS front-end compiled in.
+          - config: Debug
+            framework: tflm
+            appname: tflm
+            kws: 1
+            variant: -kws
 
     steps:
       - uses: actions/checkout@v7
@@ -26,33 +38,43 @@ jobs:
       - name: Pull toolchain image
         run: docker pull ${{ env.TOOLCHAIN_IMAGE }}
 
+      - name: Regenerate tflm_tree (tflm framework only)
+        if: matrix.framework == 'tflm'
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace/cm55_firmware/framework/tflm \
+            ${{ env.TOOLCHAIN_IMAGE }} \
+            make -f tflm.mk regen-tflm-tree
+
       - name: Build firmware
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
             -w /workspace/cm55_firmware \
             ${{ env.TOOLCHAIN_IMAGE }} \
-            make CONFIG=${{ matrix.config }} FRAMEWORK=${{ matrix.framework }}
+            make CONFIG=${{ matrix.config }} FRAMEWORK=${{ matrix.framework }} APPNAME=${{ matrix.appname }} KWS=${{ matrix.kws }}
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: firmware-${{ matrix.framework }}-${{ matrix.config }}
+          name: firmware-${{ matrix.framework }}${{ matrix.variant }}-${{ matrix.config }}
           path: |
-            cm55_firmware/build/${{ matrix.config }}/cm55_firmware.elf
-            cm55_firmware/build/${{ matrix.config }}/cm55_firmware.hex
-            cm55_firmware/build/${{ matrix.config }}/cm55_firmware.bin
+            cm55_firmware/build/${{ matrix.config }}/${{ matrix.appname }}.elf
+            cm55_firmware/build/${{ matrix.config }}/${{ matrix.appname }}.hex
+            cm55_firmware/build/${{ matrix.config }}/${{ matrix.appname }}.bin
 
   # ─────────────────────────────────────────────────────────────────────────
   # Test deploy utility — runs deepcraft-voice-assistant-model-deploy.py the
   # way a user would, up to (and including) building. No board is attached to
   # this runner, so flashing is skipped; the bundled test_gpio_control model
-  # is always used.
+  # is always used. Deepcraft-specific, so it doesn't run for the tflm
+  # framework.
   # ─────────────────────────────────────────────────────────────────────────
   test-deploy-utility:
     runs-on: ubuntu-24.04
     env:
-      TOOLCHAIN_IMAGE: ifxmakers/psoc-embedded-ai-toolchain:deepcraft-latest
+      TOOLCHAIN_IMAGE: ifxmakers/psoc-embedded-ai-toolchain:toolchains-0.1.0
 
     steps:
       - uses: actions/checkout@v7
