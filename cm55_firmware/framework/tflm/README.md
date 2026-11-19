@@ -136,7 +136,7 @@ The CM33 scripts and models are in the [examples/tflm](https://github.com/Infine
 | --- | --- | --- |
 | Sine wave regression (hello world) | `ports/psoc-edge/examples/tflm/sine_model_ipc.py` | `hello_world_int8.tflite` (also `hello_world_float.tflite`) |
 | "hey edge" keyword spotting from the live PDM mic | `ports/psoc-edge/examples/tflm/hey_edge_mic_ipc.py` | `keyword_spotting_demo.tflite` |
-| Cough detection from the live PDM mic | `cough_model_flash.py`, `cough_model_ipc.py` | `cough-rm-psoc-edge-m55-v2.0.tflite` (float32) |
+| Cough detection from the live PDM mic | `dc_rm_cough_flash.py`, `dc_rm_cough.py` | `cough-rm-psoc-edge-m55-v2.0.tflite` (float32) |
 
 
 ## Wire protocol
@@ -270,19 +270,19 @@ Inference time : <n> ms
 
 Detects coughs from the live PDM microphone with a float32 model(`cough-rm-psoc-edge-m55-v2.0.tflite`: input `[1, 30, 40]`, output `[1, 2]`).
 
-1. Copy the model and `cough_model_flash.py` to the device, then write the model to flash once:
+1. Copy the model and `dc_rm_cough_flash.py` to the device, then write the model to flash once:
 
    ```bash
    mpremote cp cough-rm-psoc-edge-m55-v2.0.tflite :
-   mpremote run cough_model_flash.py
+   mpremote run dc_rm_cough_flash.py
    ```
 
 2. Hard-reset the board. The application script is large, so precompile it to `.mpy` as described in the out-of-memory tip in [Quick Start](#4-run-the-application-on-micropython), copy it, and import it:
 
    ```bash
-   mpy-cross -march=armv7emsp cough_model_ipc.py
-   mpremote cp cough_model_ipc.mpy :
-   mpremote exec "import cough_model_ipc"
+   mpy-cross -march=armv7emsp dc_rm_cough.py
+   mpremote cp dc_rm_cough.mpy :
+   mpremote exec "import dc_rm_cough"
    ```
 
 #### What it does:
