@@ -67,3 +67,6 @@
 [submodule "psoc-edge/TARGET_KIT_PSE84_AI"]
 	path = deps/psoc-edge/TARGET_KIT_PSE84_AI
 	url = https://github.com/Infineon/TARGET_KIT_PSE84_AI.git
+[submodule "deps/tflm/tflite-micro"]
+	path = deps/tflm/tflite-micro
+	url = https://github.com/tensorflow/tflite-micro.git

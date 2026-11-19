@@ -1,17 +1,18 @@
 /*
- * ipc.h — IPC transport implementation of deepcraft_interface_t
- *          (target / C-application side, PSoC Edge IPC pipe).
+ * ipc.h — IPC transport over the PSoC Edge IPC pipe (target / C-application
+ *          side).
  *
- * Included only by adapters/deepcraft/wrapper.c — application code (main.c)
- * must NOT include this file directly; use wrapper.h instead.
+ * Included directly by application code that drives the IPC transport. An
+ * application that needs the generic transport_interface_t (transport.h)
+ * wires these functions into one (see framework/tflm/main.c).
  *
  * Provides:
- *   ipc_interface_init()  — sets up IPC pipe and registers callbacks
- *   ipc_notify_*()        — send VA events to the host
- *
- * To swap transports, only adapters/deepcraft/wrapper.c needs to change: replace the
- * include of this header and the init call.  The vtable contract
- * (deepcraft_interface_t) is unchanged.
+ *   ipc_interface_init()         — sets up the IPC pipe and the T2H ring
+ *   ipc_interface_send()         — send a command/event to the host
+ *   ipc_interface_send_data()    — stream bytes target -> host
+ *   ipc_interface_set_data_cb()  — register a host -> target bulk-data sink
+ *   ipc_interface_register_client() / ipc_interface_send_command()
+ *                                — per-client command channel
  *
  * Copyright (c) 2026 Infineon Technologies AG
  * SPDX-License-Identifier: MIT
@@ -22,25 +23,21 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include "deepcraft_interface.h"   /* from deepcraft-model-interface/src/    */
-
-/*
- * IPC transport instance.
- * `base` MUST be first — allows cast to deepcraft_interface_t *.
- */
-typedef struct {
-    deepcraft_interface_t  base;       /* vtable — MUST be first      */
-    void (*on_receive)(uint8_t cmd, uint32_t value);  /* ISR relay    */
-} ipc_interface_t;
+#include <stdbool.h>
 
 /*
  * ipc_interface_init
  *
- * Sets up the IPC pipe, registers the ISR receive callback, and stores the
- * on_start / on_stop application callbacks.
- * Call once at boot, before starting the RTOS scheduler.
+ * Initialises the target -> host ring and the IPC pipe. Call once at boot,
+ * before starting the RTOS scheduler.
  */
-void ipc_interface_init(ipc_interface_t *self);
+void ipc_interface_init(void);
+
+/* Send a command/event to the host. Returns false if the pipe stayed busy. */
+bool ipc_interface_send(uint8_t cmd, uint32_t value);
+
+/* Register the callback for messages addressed to CM55_IPC_PIPE_CLIENT_ID. */
+void ipc_interface_register_receive_cb(void (*cb)(uint8_t cmd, uint32_t value));
 
 /* Register the FreeRTOS task that processes deferred bulk-data notifications. */
 void ipc_interface_set_process_task(void *task_handle);
@@ -78,7 +75,5 @@ bool ipc_interface_register_client(uint8_t cm55_client_id, ipc_client_cb_t cb);
  * returns false if the pipe stayed busy.
  */
 bool ipc_interface_send_command(uint8_t cm33_client_id, uint8_t cmd, uint32_t value);
-
-/* ── Notify helpers: send VA model events to the host ───────────────────── */
 
 #endif /* IPC_H */

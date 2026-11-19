@@ -34,7 +34,64 @@
 static volatile bool g_va_enabled  = false;
 static TaskHandle_t  g_va_task_hdl = NULL;
 static TaskHandle_t  g_ipc_task_hdl = NULL;
-static ipc_interface_t g_ipc_interface;
+
+/* deepcraft_interface_t (external dependency) takes `self`; the IPC transport
+ * is a singleton and does not. */
+static bool dc_send(deepcraft_interface_t *self, uint8_t cmd, uint32_t value)
+{
+    (void)self;
+    return ipc_interface_send(cmd, value);
+}
+
+static void dc_register_receive_cb(deepcraft_interface_t *self,
+    void (*cb)(uint8_t cmd, uint32_t value))
+{
+    (void)self;
+    ipc_interface_register_receive_cb(cb);
+}
+
+static deepcraft_interface_t g_deepcraft_interface = {
+    .send                = dc_send,
+    .register_receive_cb = dc_register_receive_cb,
+};
+
+/* ─────────── consume CM33's PDM audio from the shared ring ──────────────
+ * CM33 streams raw int16 PCM into the host->target ring; here we compute the
+ * peak amplitude over it and return a compact result to CM33 */
+#define IPC_CMD_AUDIO_RESULT   (0xB0U)   /* CM55 -> CM33: packed audio stats */
+#define CM33_RESULT_CLIENT_ID  (3U)      /* matches the CM33 test's client id */
+
+static volatile uint32_t g_audio_bytes;  /* bytes seen in the current payload  */
+static volatile uint32_t g_audio_peak;   /* max |sample| in the current payload */
+
+/* Bulk-data sink: called (in ipc_task context) for each drained chunk. */
+static void on_ipc_audio_data(const uint8_t *data, size_t len)
+{
+    for (size_t i = 0U; i + 1U < len; i += 2U) {
+        int16_t s = (int16_t)((uint16_t)data[i] | ((uint16_t)data[i + 1U] << 8));
+        uint32_t a = (s < 0) ? (uint32_t)(-(int32_t)s) : (uint32_t)s;
+        if (a > g_audio_peak) {
+            g_audio_peak = a;
+        }
+    }
+    g_audio_bytes += (uint32_t)len;
+}
+
+/* After a payload is fully drained, return byte count + peak to CM33. */
+static void ipc_audio_report(void)
+{
+    if (g_audio_bytes == 0U) {
+        return;
+    }
+    uint32_t nbytes = g_audio_bytes;
+    uint32_t peak   = g_audio_peak;
+    g_audio_bytes = 0U;
+    g_audio_peak  = 0U;
+
+    /* Pack high 16 bits = byte count, low 16 bits = peak amplitude. */
+    uint32_t packed = (nbytes << 16) | (peak & 0xFFFFU);
+    ipc_interface_send_command(CM33_RESULT_CLIENT_ID, IPC_CMD_AUDIO_RESULT, packed);
+}
 
 static void ipc_task(void *arg)
 {
@@ -42,6 +99,7 @@ static void ipc_task(void *arg)
     for (;;) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         ipc_interface_process();
+        ipc_audio_report();
     }
 }
 
@@ -161,14 +219,16 @@ int main(void)
     __enable_irq();
 
     /* Initialise the DeepCraft model interface (transport configured inside) */
-    ipc_interface_init(&g_ipc_interface);
-    deepcraft_wrapper_init(&g_ipc_interface.base, on_va_start, on_va_stop);
+    ipc_interface_init();
+    deepcraft_wrapper_init(&g_deepcraft_interface, on_va_start, on_va_stop);
 
     result = xTaskCreate(ipc_task, IPC_TASK_NAME, IPC_TASK_STACK_SIZE,
         NULL, IPC_TASK_PRIORITY, &g_ipc_task_hdl);
     CY_ASSERT(result == pdPASS);
     // Set the IPC task as the task responsible for processing IPC events
     ipc_interface_set_process_task(g_ipc_task_hdl);
+    // Step 3 demo: compute over CM33's bulk audio and return a result to CM33.
+    ipc_interface_set_data_cb(on_ipc_audio_data);
 
 #ifdef USE_AUDIO_ENHANCEMENT
     ae_rslt_t ae_result = audio_enhancement_init(1U);
