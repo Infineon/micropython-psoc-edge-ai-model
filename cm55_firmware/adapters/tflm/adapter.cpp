@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <new>
 
@@ -157,6 +158,52 @@ alignas(alignof(tflite::MicroInterpreter))
 static uint8_t interpreter_storage[sizeof(tflite::MicroInterpreter)];
 static tflite::MicroInterpreter *interpreter = nullptr;
 
+/* Weights are read in place on every inference, and external flash (XIP) is ~2.5x slower than
+ * SOCMEM. The model is copied into the SOCMEM heap when its weights fit; otherwise it keeps
+ * running from XIP. The model length is not passed in, so the whole buffer is copied. */
+extern "C" uint8_t __HeapBase, __HeapLimit;
+#define TFLM_MODEL_HEAP_RESERVE (128U * 1024U) /* left for other malloc users (printf, ...) */
+
+static uint8_t *model_ram = nullptr;
+static size_t model_ram_cap = 0;
+static bool model_ram_tried = false;
+
+/* Highest end offset of any weight buffer: the part of the model that must fit in RAM. */
+static size_t model_weights_end(const tflite::Model *model, const uint8_t *base)
+{
+    size_t end = 0;
+    const auto *buffers = model->buffers();
+    for (size_t i = 0; buffers != nullptr && i < buffers->size(); i++) {
+        const auto *data = buffers->Get(i)->data();
+        if (data != nullptr) {
+            size_t e = static_cast<size_t>(data->data() - base) + data->size();
+            end = e > end ? e : end;
+        }
+    }
+    return end;
+}
+
+static const uint8_t *model_to_ram(const tflite::Model *model, const uint8_t *xip)
+{
+    if (!model_ram_tried) {
+        model_ram_tried = true;
+        size_t heap = static_cast<size_t>(&__HeapLimit - &__HeapBase);
+        if (heap > TFLM_MODEL_HEAP_RESERVE + 16U) {
+            size_t cap = heap - TFLM_MODEL_HEAP_RESERVE - 16U;
+            uint8_t *raw = static_cast<uint8_t *>(std::malloc(cap + 16U));
+            if (raw != nullptr) {
+                model_ram = reinterpret_cast<uint8_t *>((reinterpret_cast<uintptr_t>(raw) + 15U) & ~uintptr_t{15U});
+                model_ram_cap = cap;
+            }
+        }
+    }
+    if (model_ram == nullptr || model_weights_end(model, xip) > model_ram_cap) {
+        return xip;
+    }
+    std::memcpy(model_ram, xip, model_ram_cap);
+    return model_ram;
+}
+
 extern "C" bool tflm_adapter_load(const uint8_t *model_data)
 {
     if (interpreter != nullptr) {
@@ -166,6 +213,11 @@ extern "C" bool tflm_adapter_load(const uint8_t *model_data)
     const tflite::Model *model = tflite::GetModel(model_data);
     if (model == nullptr || model->version() != TFLM_SCHEMA_VERSION) {
         return false;
+    }
+
+    const uint8_t *ram_model = model_to_ram(model, model_data);
+    if (ram_model != model_data) {
+        model = tflite::GetModel(ram_model);
     }
 
     TflmOpResolver &resolver = GetOpResolver();

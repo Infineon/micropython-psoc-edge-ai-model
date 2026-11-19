@@ -2,4 +2,5 @@ tensorflow/tflite-micro @ 0ee39f5fc6629b7403166d325da374f01d890cf1
 requested TFLM_REF: 0ee39f5fc6629b7403166d325da374f01d890cf1
 TOOLCHAIN: GCC_ARM
 TARGET_ARCH: cortex-m55
-built: 2026-09-24T06:26:18Z
+CORE_FLAGS: -O3 (on top of the Debug -Og -g board flags)
+built: 2026-11-18T06:55:52Z
