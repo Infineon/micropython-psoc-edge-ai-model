@@ -64,6 +64,12 @@ ifneq ($(wildcard $(TFLM_PREBUILT_CORE_LIB_DEFAULT)),)
     TFLM_PREBUILT_CORE_LIB ?= $(TFLM_PREBUILT_CORE_LIB_DEFAULT)
 endif
 
+# Extra compile flags for the TFLM core only (tflm_tree). -O3 lets GCC vectorise the float
+# kernels with MVE (~6x faster float inference than the -Og Debug default). Not applied
+# globally: -O2/-O3 on the rest hits a GCC ICE in CMSIS-DSP f16. Only used when the core is
+# compiled from source; the committed prebuilt archive was built with these flags.
+TFLM_CORE_EXTRA_FLAGS ?= -O3
+
 # Tell the reference kernel headers to defer INT8/INT4/INT16 registration to
 # the cmsis_nn/*.cc optimized implementations instead of their own inline
 # fallbacks (see e.g. tensorflow/lite/micro/kernels/conv.h).
@@ -204,14 +210,14 @@ $(BUILD_DIR)/obj:
 define C_RULE
 $(call _src_to_obj,$(1)): $(1) | $(BUILD_DIR)/obj
 	@echo   CC  $(notdir $(1))
-	@$(CC) $(CFLAGS) $(DEFINES) $(INCLUDES) -MF $$(@:.o=.d) -MT $$@ -o $$@ $$<
+	@$(CC) $(CFLAGS) $(2) $(DEFINES) $(INCLUDES) -MF $$(@:.o=.d) -MT $$@ -o $$@ $$<
 endef
 $(foreach s,$(ALL_C_SRCS),$(eval $(call C_RULE,$(s))))
 
 define CXX_RULE
 $(call _src_to_obj,$(1)): $(1) | $(BUILD_DIR)/obj
 	@echo   CXX $(notdir $(1))
-	@$(CXX) $(CXXFLAGS) $(DEFINES) $(INCLUDES) -MF $$(@:.o=.d) -MT $$@ -o $$@ $$<
+	@$(CXX) $(CXXFLAGS) $(2) $(DEFINES) $(INCLUDES) -MF $$(@:.o=.d) -MT $$@ -o $$@ $$<
 endef
 $(foreach s,$(ALL_CXX_SRCS),$(eval $(call CXX_RULE,$(s))))
 
@@ -223,8 +229,16 @@ endef
 $(foreach s,$(ALL_S_SRCS),$(eval $(call S_RULE,$(s))))
 
 ifndef TFLM_PREBUILT_CORE_LIB
-$(foreach s,$(CORE_C_SRCS),$(eval $(call C_RULE,$(s))))
-$(foreach s,$(CORE_CXX_SRCS),$(eval $(call CXX_RULE,$(s))))
+$(foreach s,$(CORE_C_SRCS),$(eval $(call C_RULE,$(s),$(TFLM_CORE_EXTRA_FLAGS))))
+$(foreach s,$(CORE_CXX_SRCS),$(eval $(call CXX_RULE,$(s),$(TFLM_CORE_EXTRA_FLAGS))))
+
+# make does not track flag changes: recompile the core objects when TFLM_CORE_EXTRA_FLAGS changes.
+CORE_FLAGS_STAMP := $(BUILD_DIR)/core_flags.stamp
+.PHONY: force-core-flags-check
+force-core-flags-check:
+$(CORE_FLAGS_STAMP): force-core-flags-check | $(BUILD_DIR)/obj
+	@echo '$(TFLM_CORE_EXTRA_FLAGS)' | cmp -s - $@ 2>/dev/null || echo '$(TFLM_CORE_EXTRA_FLAGS)' > $@
+$(CORE_OBJS): $(CORE_FLAGS_STAMP)
 
 $(TFLM_CORE_LIB): $(CORE_OBJS) | $(BUILD_DIR)/obj
 	@echo   AR  $(notdir $@)
